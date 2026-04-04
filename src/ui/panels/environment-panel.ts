@@ -170,7 +170,7 @@ export class EnvironmentPanel {
     row.appendChild(lbl);
 
     const select = document.createElement('select');
-    select.style.cssText = 'background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font-mono);font-size:var(--font-size-sm);padding:2px 4px;border-radius:var(--radius);';
+    select.style.cssText = 'background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font-ui);font-size:var(--font-size-sm);padding:2px 4px;border-radius:var(--radius);';
     for (const opt of options) {
       const o = document.createElement('option');
       o.value = opt; o.textContent = opt;

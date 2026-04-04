@@ -648,7 +648,7 @@ export class MissionPanel {
     row.appendChild(lbl);
 
     const select = document.createElement('select');
-    select.style.cssText = 'width:120px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font-mono);font-size:12px;padding:3px 6px;border-radius:var(--radius);';
+    select.style.cssText = 'width:120px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font-ui);font-size:12px;padding:3px 6px;border-radius:var(--radius);';
     for (const opt of options) {
       const o = document.createElement('option');
       o.value = opt; o.textContent = opt;

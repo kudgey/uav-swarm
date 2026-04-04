@@ -103,7 +103,7 @@ export class App {
           border-bottom: 1px solid var(--border);
         }
         .app-viewport { grid-row: 2; }
-        .app-charts { grid-row: 3; min-height: 120px; }
+        .app-charts { grid-row: 3; min-height: 100px; flex-wrap: wrap; max-height: none; }
       }
     `;
     document.head.appendChild(style);

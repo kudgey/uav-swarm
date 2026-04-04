@@ -111,7 +111,7 @@ export class ControlPanel {
 
     // Pattern selector
     this.patternSelect = document.createElement('select');
-    this.patternSelect.style.cssText = 'background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font-mono);font-size:var(--font-size-sm);padding:2px 4px;border-radius:var(--radius);';
+    this.patternSelect.style.cssText = 'background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);font-family:var(--font-ui);font-size:var(--font-size-sm);padding:2px 4px;border-radius:var(--radius);';
     for (const p of ['line', 'grid', 'circle']) {
       const o = document.createElement('option');
       o.value = p; o.textContent = p;

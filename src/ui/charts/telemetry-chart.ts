@@ -13,6 +13,7 @@ export class TelemetryChart {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private wrapper: HTMLDivElement;
+  private resizeObserver: ResizeObserver;
   private series: ChartSeries[] = [];
   private times: number[] = [];
   private maxPoints = 600;
@@ -34,8 +35,8 @@ export class TelemetryChart {
     this.ctx = this.canvas.getContext('2d')!;
 
     // Resize canvas to actual pixel size
-    const ro = new ResizeObserver(() => this.resizeCanvas());
-    ro.observe(this.canvas);
+    this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
+    this.resizeObserver.observe(this.canvas);
   }
 
   private resizeCanvas(): void {
@@ -152,5 +153,9 @@ export class TelemetryChart {
     for (const s of this.series) {
       s.data = [];
     }
+  }
+
+  dispose(): void {
+    this.resizeObserver.disconnect();
   }
 }
