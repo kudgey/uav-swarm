@@ -11,14 +11,15 @@ import { defaultSimConfig } from '@sim/core/config-defaults';
 import { buildPatrolMissionSteps, buildPatrolConfig } from '@sim/missions/mission-builder';
 
 export type MissionType =
-  | 'crossing'
-  | 'head-on'
-  | 'squeeze'
   | 'formation-transit'
-  | 'scatter-regroup'
-  | 'wind-gust'
+  | 'formation-hold-wind'
+  | 'formation-reconfig'
   | 'leader-loss'
-  | 'long-range-patrol';
+  | 'multi-loss'
+  | 'long-range-patrol'
+  | 'consensus-transit'
+  | 'consensus-loss'
+  | 'consensus-patrol';
 
 interface MissionDef {
   type: MissionType;
@@ -33,14 +34,15 @@ type MissionStep = { time: number; droneId: number | 'all'; action: string; para
 const DEFAULT_MISSION_CENTER: [number, number, number] = [5, 5, -2];
 
 const MISSIONS: MissionDef[] = [
-  { type: 'crossing', label: 'Crossing Paths', description: 'All drones fly to mirror positions through center — tests ORCA head-on avoidance', minDrones: 3 },
-  { type: 'head-on', label: 'Head-On Groups', description: 'Two groups fly toward each other — tests group collision avoidance', minDrones: 4 },
-  { type: 'squeeze', label: 'Squeeze to Center', description: 'All drones converge to one point — ORCA must keep separation', minDrones: 3 },
-  { type: 'formation-transit', label: 'Formation Transit', description: 'Fly in formation to waypoint and back — tests formation + ORCA', minDrones: 3 },
-  { type: 'scatter-regroup', label: 'Scatter & Regroup', description: 'Scatter to random points then regroup — tests dynamic avoidance', minDrones: 4 },
-  { type: 'wind-gust', label: 'Wind Gust', description: 'Tight formation hover + sudden 5 m/s wind — tests stability and separation', minDrones: 3 },
-  { type: 'leader-loss', label: 'Leader Loss', description: 'Formation flight, leader goes silent mid-way — followers must avoid + reorganize', minDrones: 4 },
-  { type: 'long-range-patrol', label: 'Long Range Patrol', description: 'Multi-waypoint patrol route with auto-advance, optional return to base', minDrones: 3 },
+  { type: 'formation-transit', label: 'Formation Transit', description: 'Swarm flies in formation to waypoint and back, maintaining structure', minDrones: 3 },
+  { type: 'formation-hold-wind', label: 'Formation + Wind', description: 'Hold tight formation while wind gusts hit — tests swarm stability', minDrones: 3 },
+  { type: 'formation-reconfig', label: 'Formation Reconfig', description: 'Formation transit, one drone killed mid-flight — swarm reconfigures and continues', minDrones: 4 },
+  { type: 'leader-loss', label: 'Leader Loss + Handoff', description: 'Leader killed during patrol — new leader elected, mission plan handed off', minDrones: 4 },
+  { type: 'multi-loss', label: 'Multi Drone Loss', description: 'Two drones killed at different times — swarm adapts twice and finishes mission', minDrones: 6 },
+  { type: 'long-range-patrol', label: 'Long Range Patrol', description: 'GPS-denied multi-waypoint patrol with VIO drift, no anchors, return to base', minDrones: 3 },
+  { type: 'consensus-transit', label: 'Consensus Transit (no leader)', description: 'Every drone has the same route + own offset. No leader — consensus syncs progress', minDrones: 3 },
+  { type: 'consensus-loss', label: 'Consensus + Drone Loss', description: 'Leaderless transit, one drone killed — no handoff needed, swarm continues', minDrones: 4 },
+  { type: 'consensus-patrol', label: 'Consensus Patrol (no leader)', description: 'GPS-denied leaderless patrol. Every drone navigates independently, consensus keeps formation', minDrones: 3 },
 ];
 
 function computePathBounds(
@@ -144,14 +146,21 @@ export function buildMissionConfig(
   ];
   cfg.environment.scene.sceneBounds = computePathBounds(hoverTargets, extraTargets);
 
-  // Long-range patrol: use shared config builder for full parity with scenario runner
-  if (opts?.type === 'long-range-patrol') {
+  // Consensus missions: switch formation mode
+  if (opts?.type?.startsWith('consensus')) {
+    cfg.swarm.formation.mode = 'consensus';
+    cfg.swarm.formation.consensusGain = 0.5;
+  }
+
+  // Long-range patrol / consensus patrol: use shared config builder
+  if (opts?.type === 'long-range-patrol' || opts?.type === 'consensus-patrol') {
     return buildPatrolConfig({
       droneCount: cfg.swarm.droneCount,
       pattern: cfg.swarm.initialPattern as 'line' | 'grid' | 'circle',
       spacing: cfg.swarm.patternSpacing,
       distance,
       wind: opts?.wind,
+      consensusMode: opts?.type === 'consensus-patrol',
     });
   }
 
@@ -186,122 +195,140 @@ export function buildVisualMissionSteps(opts: {
     steps.push({ time: 0.5, droneId: i, action: 'hover', params: { position: hoverTargets[i], yaw: 0 } });
   }
 
+  const legTime = distance / Math.max(0.5, speed);
+  // All swarm missions enable formation (consensus or leader-follower — set in config)
+  steps.push({ time: 2, droneId: 'all', action: 'formation-enable' });
+
   switch (type) {
-    // ── Crossing: every drone flies to its mirror position through center ──
-    case 'crossing':
-      for (let i = 0; i < droneCount; i++) {
-        const p = hoverTargets[i];
-        steps.push({
-          time: 3, droneId: i, action: 'waypoint',
-          params: { position: [2 * center[0] - p[0], 2 * center[1] - p[1], p[2]], yaw: 0, speed },
-        });
-      }
-      break;
-
-    // ── Head-on: split into two groups, fly toward each other ──
-    case 'head-on': {
-      const half = Math.floor(droneCount / 2);
-      // Group A (first half): hover left, then fly right
-      for (let i = 0; i < half; i++) {
-        steps.push({ time: 0.5, droneId: i, action: 'hover',
-          params: { position: [center[0] - distance / 2, center[1] + (i - (half - 1) / 2) * spacing, center[2]], yaw: 0 } });
-      }
-      // Group B (second half): hover right, then fly left
-      for (let i = half; i < droneCount; i++) {
-        const j = i - half;
-        const groupSize = droneCount - half;
-        steps.push({ time: 0.5, droneId: i, action: 'hover',
-          params: { position: [center[0] + distance / 2, center[1] + (j - (groupSize - 1) / 2) * spacing, center[2]], yaw: 0 } });
-      }
-      // At t=4, send both groups toward each other
-      for (let i = 0; i < half; i++) {
-        steps.push({ time: 4, droneId: i, action: 'waypoint',
-          params: { position: [center[0] + distance / 2, center[1] + (i - (half - 1) / 2) * spacing, center[2]], yaw: 0, speed } });
-      }
-      for (let i = half; i < droneCount; i++) {
-        const j = i - half;
-        const groupSize = droneCount - half;
-        steps.push({ time: 4, droneId: i, action: 'waypoint',
-          params: { position: [center[0] - distance / 2, center[1] + (j - (groupSize - 1) / 2) * spacing, center[2]], yaw: 0, speed } });
-      }
-      break;
-    }
-
-    // ── Squeeze: all drones converge to center point, ORCA keeps separation ──
-    case 'squeeze':
-      for (let i = 0; i < droneCount; i++) {
-        steps.push({
-          time: 3, droneId: i, action: 'waypoint',
-          params: { position: [center[0], center[1], center[2]], yaw: 0, speed: speed * 0.8 },
-        });
-      }
-      break;
-
-    // ── Formation transit: fly in formation to waypoint, then back ──
+    // ── Formation transit: fly out and back as a swarm ──
     case 'formation-transit': {
-      steps.push({ time: 2, droneId: 'all', action: 'formation-enable' });
-      const outPos: [number, number, number] = [center[0] + distance, center[1], center[2]];
-      const tOut = 4;
-      const legTime = distance / Math.max(0.5, speed);
-      // Leader flies out
-      pushWaypointLeg(steps, 0, tOut, outPos, 0, speed);
-      // Leader flies back
-      pushWaypointLeg(steps, 0, tOut + legTime + 2, [center[0], center[1], center[2]], 0, speed);
+      // Leader mission plan: out → back
+      steps.push({ time: 3, droneId: 0, action: 'set-mission-plan', params: { waypoints: [
+        { position: [center[0] + distance, center[1], center[2]], yaw: 0, speed },
+        { position: [center[0], center[1], center[2]], yaw: 0, speed },
+      ]}});
       break;
     }
 
-    // ── Scatter & regroup: fly to spread points, then all converge back ──
-    case 'scatter-regroup': {
-      // Scatter phase: each drone to a distant point
-      const scatterRadius = Math.max(distance / 2, 5);
-      for (let i = 0; i < droneCount; i++) {
-        const angle = (2 * Math.PI * i) / droneCount;
-        steps.push({
-          time: 3, droneId: i, action: 'waypoint',
-          params: {
-            position: [center[0] + scatterRadius * Math.cos(angle), center[1] + scatterRadius * Math.sin(angle), center[2]],
-            yaw: 0, speed,
-          },
-        });
-      }
-      // Regroup phase: everyone back to own pattern position (through center!)
-      const regroupTime = 3 + scatterRadius / Math.max(0.5, speed) + 2;
-      for (let i = 0; i < droneCount; i++) {
-        steps.push({
-          time: regroupTime, droneId: i, action: 'waypoint',
-          params: { position: hoverTargets[i], yaw: 0, speed },
-        });
-      }
-      break;
-    }
-
-    // ── Wind gust: tight formation hover + sudden strong wind ──
-    case 'wind-gust':
-      steps.push({ time: 2, droneId: 'all', action: 'formation-enable' });
-      // Hit with 5 m/s wind at t=4
+    // ── Formation hold under wind ──
+    case 'formation-hold-wind': {
+      // Just hold formation, wind hits at t=4 and t=8 (two gusts)
       steps.push({
         time: 4, droneId: 'all', action: 'inject-fault',
         params: { type: 'wind-gust', speed: Math.max(wind, 5) },
       });
       break;
+    }
 
-    // ── Leader loss: formation flight, leader comms die, followers must reorganize ──
-    case 'leader-loss': {
-      steps.push({ time: 2, droneId: 'all', action: 'formation-enable' });
-      pushWaypointLeg(steps, 0, 3, [center[0] + distance, center[1], center[2]], 0, speed);
-      steps.push({ time: 6, droneId: 0, action: 'kill-drone' });
+    // ── Formation reconfig: kill one drone mid-transit ──
+    case 'formation-reconfig': {
+      // Leader patrols
+      steps.push({ time: 3, droneId: 0, action: 'set-mission-plan', params: { waypoints: [
+        { position: [center[0] + distance, center[1], center[2]], yaw: 0, speed },
+        { position: [center[0], center[1], center[2]], yaw: 0, speed },
+      ]}});
+      // Kill drone 2 mid-flight
+      const killTime = Math.max(5, legTime * 0.4);
+      steps.push({ time: killTime, droneId: 2, action: 'kill-drone' });
       break;
     }
 
-    // Long range patrol: uses shared mission builder
+    // ── Leader loss: leader killed, mission handed off to new leader ──
+    case 'leader-loss': {
+      // Leader gets a long mission plan
+      steps.push({ time: 3, droneId: 0, action: 'set-mission-plan', params: { waypoints: [
+        { position: [center[0] + distance * 0.5, center[1], center[2]], yaw: 0, speed },
+        { position: [center[0] + distance, center[1], center[2]], yaw: 0, speed },
+        { position: [center[0], center[1], center[2]], yaw: 0, speed },
+      ]}});
+      // Kill leader at ~40% of outbound leg
+      const killTime = Math.max(6, legTime * 0.3);
+      steps.push({ time: killTime, droneId: 0, action: 'kill-drone' });
+      break;
+    }
+
+    // ── Multi-loss: two drones killed at different times ──
+    case 'multi-loss': {
+      steps.push({ time: 3, droneId: 0, action: 'set-mission-plan', params: { waypoints: [
+        { position: [center[0] + distance * 0.5, center[1], center[2]], yaw: 0, speed },
+        { position: [center[0] + distance, center[1], center[2]], yaw: 0, speed },
+        { position: [center[0], center[1], center[2]], yaw: 0, speed },
+      ]}});
+      // First loss at 30% of outbound
+      const kill1 = Math.max(5, legTime * 0.3);
+      steps.push({ time: kill1, droneId: 3, action: 'kill-drone' });
+      // Second loss at 60%
+      const kill2 = Math.max(kill1 + 4, legTime * 0.6);
+      steps.push({ time: kill2, droneId: 4, action: 'kill-drone' });
+      break;
+    }
+
+    // ── Long range patrol: uses shared mission builder ──
     case 'long-range-patrol':
       return buildPatrolMissionSteps({
         droneCount, distance, waypointCount: Math.max(3, Math.ceil(distance / 20)),
         speed, returnToBase: true, center, spacing, pattern,
       });
+
+    // ══ LEADERLESS (consensus) missions ══
+    // Each drone gets OFFSET-ADJUSTED waypoints: centroid route + own pattern offset.
+    // No formation-enable, no leader. Consensus progress sync keeps them aligned.
+
+    case 'consensus-transit': {
+      const centroidRoute: [number, number, number][] = [
+        [center[0] + distance, center[1], center[2]],
+        [center[0], center[1], center[2]],
+      ];
+      for (let i = 0; i < droneCount; i++) {
+        const off = hoverTargets[i];
+        const droneWps = centroidRoute.map(wp => ({
+          position: [wp[0] + (off[0] - center[0]), wp[1] + (off[1] - center[1]), wp[2]] as [number, number, number],
+          yaw: 0, speed,
+        }));
+        steps.push({ time: 3, droneId: i, action: 'set-mission-plan', params: { waypoints: droneWps } });
+      }
+      break;
+    }
+
+    case 'consensus-loss': {
+      const centroidRoute: [number, number, number][] = [
+        [center[0] + distance * 0.5, center[1], center[2]],
+        [center[0] + distance, center[1], center[2]],
+        [center[0], center[1], center[2]],
+      ];
+      for (let i = 0; i < droneCount; i++) {
+        const off = hoverTargets[i];
+        const droneWps = centroidRoute.map(wp => ({
+          position: [wp[0] + (off[0] - center[0]), wp[1] + (off[1] - center[1]), wp[2]] as [number, number, number],
+          yaw: 0, speed,
+        }));
+        steps.push({ time: 3, droneId: i, action: 'set-mission-plan', params: { waypoints: droneWps } });
+      }
+      const killTime = Math.max(6, legTime * 0.4);
+      steps.push({ time: killTime, droneId: 2, action: 'kill-drone' });
+      break;
+    }
+
+    case 'consensus-patrol': {
+      const wpCount = Math.max(3, Math.ceil(distance / 20));
+      const centroidRoute: [number, number, number][] = [];
+      for (let j = 1; j <= wpCount; j++) centroidRoute.push([center[0] + distance * j / wpCount, center[1], center[2]]);
+      for (let j = wpCount - 1; j >= 0; j--) centroidRoute.push([center[0] + distance * j / wpCount, center[1], center[2]]);
+
+      for (let i = 0; i < droneCount; i++) {
+        const off = hoverTargets[i];
+        const droneWps = centroidRoute.map(wp => ({
+          position: [wp[0] + (off[0] - center[0]), wp[1] + (off[1] - center[1]), wp[2]] as [number, number, number],
+          yaw: 0, speed,
+        }));
+        steps.push({ time: 3, droneId: i, action: 'set-mission-plan', params: { waypoints: droneWps } });
+      }
+      break;
+    }
   }
 
-  if (wind > 0 && type !== 'wind-gust') {
+  // Apply wind for all formation missions if set
+  if (wind > 0 && type !== 'formation-hold-wind') {
     steps.push({
       time: 0, droneId: 'all', action: 'set-environment',
       params: {
@@ -387,16 +414,14 @@ export class MissionPanel {
     const section = this.makeSection('2. Mission');
     section.id = 'mission-step2';
 
-    this.missionSelect = this.addSelectRow(section, 'Type', MISSIONS.map(m => m.type), 'crossing');
-    // Custom labels
+    this.missionSelect = this.addSelectRow(section, 'Type', MISSIONS.map(m => m.type), 'formation-transit');
     const options = this.missionSelect.querySelectorAll('option');
     options.forEach((opt, i) => { opt.textContent = MISSIONS[i].label; });
 
-    // Description
     const desc = document.createElement('div');
     desc.id = 'mission-desc';
     desc.style.cssText = 'font-size:11px;color:var(--text-muted);margin:-4px 0 4px;';
-    desc.textContent = MISSIONS.find(m => m.type === 'crossing')?.description ?? '';
+    desc.textContent = MISSIONS.find(m => m.type === 'formation-transit')?.description ?? '';
     section.appendChild(desc);
     this.missionSelect.addEventListener('change', () => {
       const m = MISSIONS.find(x => x.type === this.missionSelect.value);
@@ -496,7 +521,7 @@ export class MissionPanel {
       this.patternSelect.value as SwarmPattern,
       parseFloat(this.spacingInput.value) || 2,
       {
-        type: (this.missionSelect?.value as MissionType | undefined) ?? 'crossing',
+        type: (this.missionSelect?.value as MissionType | undefined) ?? 'formation-transit',
         distance: parseFloat(this.distanceInput?.value ?? '10') || 10,
         wind: parseFloat(this.windSpeedInput?.value ?? '0') || 0,
       },

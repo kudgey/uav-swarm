@@ -125,6 +125,22 @@ export class CascadedController {
     return this.guidance.exportRemainingPlan();
   }
 
+  syncConsensusProgress(neighborProgresses: number[]): void {
+    this.guidance.syncConsensusProgress(neighborProgresses);
+  }
+
+  setConsensusCorrection(correction: import('@sim/core/types').Vec3): void {
+    this.guidance.setConsensusCorrection(correction);
+  }
+
+  clearConsensusCorrection(): void {
+    this.guidance.clearConsensusCorrection();
+  }
+
+  get inConsensusFormation(): boolean {
+    return this.guidance.consensusCorrectionActive;
+  }
+
   /** Set dynamic formation target (called each tick by formation manager). */
   setFormationTarget(targetPos: Vec3, targetVel: Vec3, yaw: number): void {
     if (this._armState !== 'armed') return;

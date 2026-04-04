@@ -39,6 +39,10 @@ export class GuidanceModule {
   private missionIndex = 0;
   private static readonly ARRIVAL_RADIUS = 1.0; // m
 
+  // Consensus correction: velocity bias toward formation position (applied in waypoint mode)
+  private _consensusCorrection: Vec3 = v3Create();
+  private _consensusCorrectionActive = false;
+
   private output: GuidanceOutput = {
     positionDes: v3Create(),
     velocityDes: v3Create(),
@@ -74,6 +78,7 @@ export class GuidanceModule {
   setMissionPlan(waypoints: MissionWaypoint[]): void {
     this.missionQueue = waypoints.slice();
     this.missionIndex = 0;
+    this._isFormation = false; // mission plan takes over from formation
     if (waypoints.length > 0) {
       const wp = waypoints[0];
       this.waypointTarget[0] = wp.position[0];
@@ -98,6 +103,49 @@ export class GuidanceModule {
   exportRemainingPlan(): MissionWaypoint[] {
     if (this.missionQueue.length === 0) return [];
     return this.missionQueue.slice(this.missionIndex);
+  }
+
+  /**
+   * Set consensus velocity correction: pulls drone toward formation position.
+   * Applied additively in waypoint mode — doesn't override waypoint target.
+   */
+  setConsensusCorrection(correction: Vec3): void {
+    this._consensusCorrection[0] = correction[0];
+    this._consensusCorrection[1] = correction[1];
+    this._consensusCorrection[2] = correction[2];
+    this._consensusCorrectionActive = true;
+  }
+
+  clearConsensusCorrection(): void {
+    this._consensusCorrectionActive = false;
+    this._consensusCorrection[0] = 0;
+    this._consensusCorrection[1] = 0;
+    this._consensusCorrection[2] = 0;
+  }
+
+  get consensusCorrectionActive(): boolean { return this._consensusCorrectionActive; }
+
+  /**
+   * Consensus progress sync: only advance past current waypoint if neighbors
+   * have also reached it (median progress >= current). Prevents lone-runner.
+   */
+  syncConsensusProgress(neighborProgresses: number[]): void {
+    if (this.missionQueue.length === 0) return;
+    // Include self
+    const all = [this.missionIndex, ...neighborProgresses].sort((a, b) => a - b);
+    const median = all[Math.floor(all.length / 2)];
+    // Don't let self get more than 1 ahead of median
+    if (this.missionIndex > median + 1) {
+      this.missionIndex = Math.floor(median + 1);
+      if (this.missionIndex < this.missionQueue.length) {
+        const wp = this.missionQueue[this.missionIndex];
+        this.waypointTarget[0] = wp.position[0];
+        this.waypointTarget[1] = wp.position[1];
+        this.waypointTarget[2] = wp.position[2];
+        this.waypointYaw = wp.yaw;
+        this.waypointSpeed = wp.speed;
+      }
+    }
   }
 
   /** Set dynamic formation target (called each tick by formation manager). */
@@ -193,6 +241,13 @@ export class GuidanceModule {
       } else {
         out.velocityDes[0] = 0; out.velocityDes[1] = 0; out.velocityDes[2] = 0;
       }
+      // Consensus correction: additive velocity toward formation position
+      if (this._consensusCorrectionActive) {
+        out.velocityDes[0] += this._consensusCorrection[0];
+        out.velocityDes[1] += this._consensusCorrection[1];
+        // No z correction — altitude managed by position target
+      }
+
       out.accelerationDes[0] = 0; out.accelerationDes[1] = 0; out.accelerationDes[2] = 0;
       out.yawDes = this.waypointYaw;
     }

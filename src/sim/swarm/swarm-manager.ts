@@ -349,8 +349,56 @@ export class SwarmManager {
     // Detect drone loss via comm silence and reconfigure formation
     this.detectAndHandleLostDrones(simTime);
 
+    const isConsensus = fm['config'].mode === 'consensus';
+
     for (const d of this.drones) {
       if (d.destroyed) continue;
+
+      // Consensus mode: sync progress + compute consensus correction velocity
+      if (isConsensus) {
+        const neighborProgresses: number[] = [];
+        for (const [, est] of d.neighborEstimates) {
+          if (est.missionProgress !== undefined) neighborProgresses.push(est.missionProgress);
+        }
+        if (neighborProgresses.length > 0) {
+          d.controller.syncConsensusProgress(neighborProgresses);
+        }
+
+        // If drone has an active mission plan: compute consensus correction
+        // (pulls drone toward correct formation position while it flies its waypoints)
+        const progress = d.controller.getMissionProgress();
+        if (progress.total > 0 && !progress.done) {
+          const est = d.ekf.getEstimate();
+          const state = fm.getFormationTarget(
+            d.id, est, d.neighborEstimates, simTime, this.commConfig.estimateTimeout);
+          d.lastFormationState = state;
+
+          if (state.active && state.neighborCount > 0) {
+            // Consensus correction: velocity toward formation target position
+            // Clamped to avoid large transients during initial convergence
+            const K = fm['config'].consensusGain;
+            const MAX_CORRECTION = 1.0; // m/s max correction velocity
+            let cx = K * (state.targetPosition[0] - est.position[0]);
+            let cy = K * (state.targetPosition[1] - est.position[1]);
+            const mag = Math.sqrt(cx * cx + cy * cy);
+            if (mag > MAX_CORRECTION) {
+              cx *= MAX_CORRECTION / mag;
+              cy *= MAX_CORRECTION / mag;
+            }
+            const correction = v3Create(cx, cy, 0);
+            d.controller.setConsensusCorrection(correction);
+          } else {
+            d.controller.clearConsensusCorrection();
+          }
+          continue; // don't call setFormationTarget — drone stays in waypoint mode
+          continue;
+        } else {
+          // Mission done or no plan: clear correction and just hover
+          d.controller.clearConsensusCorrection();
+          continue; // don't fall through to leader-follower setFormationTarget
+        }
+      }
+
       const est = d.ekf.getEstimate();
       const state = fm.getFormationTarget(
         d.id, est, d.neighborEstimates, simTime, this.commConfig.estimateTimeout);
@@ -421,11 +469,15 @@ export class SwarmManager {
         attitudeHealthy: true,
         inFormation: this.formationManager['config'].enabled && (
           d.controller.controlMode === 'formation' ||
-          // Leader-follower only: leader stays in hover/waypoint but is the formation reference
+          d.controller.inConsensusFormation ||
+          // Consensus mode with mission plan: always report inFormation to bootstrap consensus
+          (this.formationManager['config'].mode === 'consensus' &&
+           d.controller.getMissionProgress().total > 0) ||
           (this.formationManager['config'].mode === 'leader-follower' &&
            d.id === this.formationManager.getLeaderId() &&
            (d.controller.controlMode === 'hover' || d.controller.controlMode === 'waypoint'))
         ),
+        missionProgress: d.controller.getMissionProgress().current,
       };
 
       this.commSystem.send({
@@ -457,6 +509,7 @@ export class SwarmManager {
             aligned: p.aligned,
             attitudeHealthy: p.attitudeHealthy,
             inFormation: p.inFormation,
+            missionProgress: p.missionProgress,
           });
         }
       }

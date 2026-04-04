@@ -53,6 +53,7 @@ export interface NeighborEstimate {
   aligned: boolean;
   attitudeHealthy: boolean;
   inFormation: boolean;
+  missionProgress?: number;
 }
 
 /**

@@ -36,4 +36,5 @@ export interface DroneStateEstimatePayload {
   aligned: boolean;
   attitudeHealthy: boolean;
   inFormation: boolean;
+  missionProgress?: number; // consensus: current waypoint index for leaderless sync
 }

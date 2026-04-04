@@ -142,6 +142,7 @@ export function buildPatrolConfig(opts: {
   center?: [number, number, number];
   wind?: number;
   anchorFree?: boolean;
+  consensusMode?: boolean;
 }): SimConfig {
   const center = opts.center ?? [5, 5, -2];
   const cfg = defaultSimConfig();
@@ -168,6 +169,12 @@ export function buildPatrolConfig(opts: {
   if (opts.anchorFree !== false) {
     cfg.environment.scene.uwbAnchors = [];
     if (cfg.sensors.cameraVIO) cfg.sensors.cameraVIO.vioDriftEnabled = true;
+  }
+  // Consensus mode: leaderless formation
+  if (opts.consensusMode) {
+    cfg.swarm.formation.mode = 'consensus';
+    cfg.swarm.formation.consensusGain = 0.5;
+    cfg.swarm.formation.enabled = true;
   }
   return cfg;
 }
