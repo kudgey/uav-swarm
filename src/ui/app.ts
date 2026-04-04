@@ -73,12 +73,14 @@ export class App {
       .app-charts {
         grid-column: 1 / -1;
         border-top: 1px solid var(--border);
-        padding: 6px 8px;
+        padding: 8px;
         display: flex;
         gap: 8px;
         overflow-x: auto;
         background: var(--bg-secondary);
-        max-height: 140px;
+        min-height: 150px;
+        max-height: clamp(150px, 22vh, 220px);
+        align-items: stretch;
       }
       .advanced-toggle {
         padding: 8px 12px; font-size: 11px; color: var(--text-muted);
@@ -90,8 +92,18 @@ export class App {
       .advanced-body { display: none; padding: 6px; }
       .advanced-body.open { display: flex; flex-direction: column; gap: 6px; }
       @media (max-width: 700px) {
-        .app-layout { grid-template-columns: 1fr; }
-        .app-sidebar { display: none; }
+        .app-layout {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto 1fr auto;
+        }
+        .app-sidebar {
+          grid-row: 1;
+          max-height: 40vh;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .app-viewport { grid-row: 2; }
+        .app-charts { grid-row: 3; min-height: 120px; }
       }
     `;
     document.head.appendChild(style);
@@ -158,17 +170,17 @@ export class App {
     chartsRow.className = 'app-charts';
     layout.appendChild(chartsRow);
 
-    this.posChart = new TelemetryChart(chartsRow, 'Position (m)', 280, 120);
+    this.posChart = new TelemetryChart(chartsRow, 'Position (m)');
     this.posChart.addSeries('X', '#ff6666');
     this.posChart.addSeries('Y', '#66ff66');
     this.posChart.addSeries('Z', '#6666ff');
 
-    this.velChart = new TelemetryChart(chartsRow, 'Velocity (m/s)', 280, 120);
+    this.velChart = new TelemetryChart(chartsRow, 'Velocity (m/s)');
     this.velChart.addSeries('X', '#ff6666');
     this.velChart.addSeries('Y', '#66ff66');
     this.velChart.addSeries('Z', '#6666ff');
 
-    this.motorChart = new TelemetryChart(chartsRow, 'Motor Speed (rad/s)', 280, 120);
+    this.motorChart = new TelemetryChart(chartsRow, 'Motors (rad/s)');
     this.motorChart.addSeries('M1', '#44aa66');
     this.motorChart.addSeries('M2', '#aa6644');
     this.motorChart.addSeries('M3', '#44aa66');

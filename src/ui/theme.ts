@@ -23,9 +23,11 @@ export function injectTheme(): void {
       --simplified-color: #cc8800;
       --experimental-color: #2a6ecc;
       --validated-color: #22aa55;
+      --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-      --font-size-sm: 11px;
-      --font-size-md: 13px;
+      --font-size-xs: 10px;
+      --font-size-sm: 12px;
+      --font-size-md: 14px;
       --radius: 4px;
       --panel-padding: 10px;
     }
@@ -87,7 +89,7 @@ export function injectTheme(): void {
       background: var(--bg-tertiary);
       border: 1px solid var(--border);
       color: var(--text-primary);
-      font-family: var(--font-mono);
+      font-family: var(--font-ui);
       font-size: var(--font-size-sm);
       padding: 4px 12px;
       border-radius: var(--radius);

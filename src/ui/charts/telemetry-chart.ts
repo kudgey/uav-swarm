@@ -12,27 +12,39 @@ export interface ChartSeries {
 export class TelemetryChart {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
+  private wrapper: HTMLDivElement;
   private series: ChartSeries[] = [];
   private times: number[] = [];
   private maxPoints = 600;
-  constructor(parent: HTMLElement, title: string, width = 300, height = 120) {
+  constructor(parent: HTMLElement, title: string, _width = 300, _height = 120) {
 
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'margin-bottom:6px;';
-    parent.appendChild(wrapper);
+    this.wrapper = document.createElement('div');
+    this.wrapper.style.cssText = 'flex:1;min-width:200px;display:flex;flex-direction:column;';
+    parent.appendChild(this.wrapper);
 
     const label = document.createElement('div');
     label.textContent = title;
-    label.style.cssText = 'color:var(--text-secondary);font-size:10px;margin-bottom:2px;';
-    wrapper.appendChild(label);
+    label.style.cssText = 'color:var(--text-secondary);font-family:var(--font-ui);font-size:var(--font-size-xs);margin-bottom:2px;font-weight:500;';
+    this.wrapper.appendChild(label);
 
     this.canvas = document.createElement('canvas');
-    this.canvas.width = width;
-    this.canvas.height = height;
-    this.canvas.style.cssText = `width:${width}px;height:${height}px;background:var(--bg-tertiary);border-radius:var(--radius);`;
-    wrapper.appendChild(this.canvas);
+    this.canvas.style.cssText = 'width:100%;flex:1;background:var(--bg-tertiary);border-radius:var(--radius);';
+    this.wrapper.appendChild(this.canvas);
 
     this.ctx = this.canvas.getContext('2d')!;
+
+    // Resize canvas to actual pixel size
+    const ro = new ResizeObserver(() => this.resizeCanvas());
+    ro.observe(this.canvas);
+  }
+
+  private resizeCanvas(): void {
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    this.canvas.width = Math.round(rect.width * dpr);
+    this.canvas.height = Math.round(rect.height * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   addSeries(label: string, color: string): number {
@@ -57,14 +69,16 @@ export class TelemetryChart {
 
   render(): void {
     const { ctx, canvas } = this;
-    const w = canvas.width;
-    const h = canvas.height;
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    if (w === 0 || h === 0) return;
     const pad = { top: 4, bottom: 14, left: 40, right: 8 };
     const plotW = w - pad.left - pad.right;
     const plotH = h - pad.top - pad.bottom;
 
     // Clear
-    ctx.fillStyle = '#12121a';
+    ctx.fillStyle = '#1a1a28';
     ctx.fillRect(0, 0, w, h);
 
     if (this.times.length < 2) return;
