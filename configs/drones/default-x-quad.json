@@ -1,0 +1,17 @@
+{
+  "mass": 1.0,
+  "inertia": [0.0135, 0.0135, 0.024],
+  "armLength": 0.17,
+  "numRotors": 4,
+  "rotorDirections": [1, -1, 1, -1],
+  "kT": 8.5e-6,
+  "kQ": 1.2e-6,
+  "motorTau": 0.02,
+  "motorOmegaMin": 0,
+  "motorOmegaMax": 838,
+  "motorRateLimit": 50000,
+  "motorDeadZone": 30,
+  "dragCoeffLinear": [0.1, 0.1, 0.15],
+  "dragCoeffQuadratic": [0, 0, 0],
+  "dragMode": "linear"
+}
