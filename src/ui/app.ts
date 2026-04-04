@@ -59,7 +59,7 @@ export class App {
     style.textContent = `
       .app-layout {
         display: grid;
-        grid-template-rows: 1fr auto;
+        grid-template-rows: 1fr 180px;
         grid-template-columns: 300px 1fr;
         width: 100%; height: 100%;
       }
@@ -76,10 +76,8 @@ export class App {
         padding: 8px;
         display: flex;
         gap: 8px;
-        overflow-x: auto;
+        overflow: hidden;
         background: var(--bg-secondary);
-        min-height: 150px;
-        max-height: clamp(150px, 22vh, 220px);
         align-items: stretch;
       }
       .advanced-toggle {
