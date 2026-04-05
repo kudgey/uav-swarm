@@ -23,6 +23,10 @@ export class ViewportPanel {
   private formationLines: THREE.LineSegments | null = null;
   private selectedDroneId = 0;
   private animId = 0;
+  private raycaster = new THREE.Raycaster();
+  private mouse = new THREE.Vector2();
+  private pointerDownPos = { x: 0, y: 0 };
+  onDroneSelected: ((droneId: number) => void) | null = null;
 
   // Trail system
   private static readonly TRAIL_MAX_POINTS = 600; // ~10s at 60fps
@@ -73,6 +77,17 @@ export class ViewportPanel {
 
     // Drone meshes added dynamically in updateSwarm()
 
+    // Click to select drone (pointerdown+pointerup to distinguish from orbit drag)
+    this.renderer.domElement.addEventListener('pointerdown', (e) => {
+      this.pointerDownPos.x = e.clientX;
+      this.pointerDownPos.y = e.clientY;
+    });
+    this.renderer.domElement.addEventListener('pointerup', (e) => {
+      const dx = e.clientX - this.pointerDownPos.x;
+      const dy = e.clientY - this.pointerDownPos.y;
+      if (dx * dx + dy * dy < 25) this.onClickSelect(e); // <5px movement = click
+    });
+
     // Handle resize
     this.onResize();
     window.addEventListener('resize', () => this.onResize());
@@ -81,9 +96,14 @@ export class ViewportPanel {
     this.render();
   }
 
-  private buildDroneMesh(selected = false): THREE.Group {
+  private buildDroneMesh(droneId: number, selected = false): THREE.Group {
     const group = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: selected ? 0x66aaff : 0x4466aa });
+    const droneColor = ViewportPanel.TRAIL_COLORS[droneId % ViewportPanel.TRAIL_COLORS.length];
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: selected ? 0xffffff : droneColor,
+      emissive: selected ? droneColor : 0x000000,
+      emissiveIntensity: selected ? 0.4 : 0,
+    });
     const armMat = new THREE.MeshStandardMaterial({ color: 0x666688 });
     const rotorMatCCW = new THREE.MeshStandardMaterial({ color: 0x44aa66, transparent: true, opacity: 0.6 });
     const rotorMatCW = new THREE.MeshStandardMaterial({ color: 0xaa6644, transparent: true, opacity: 0.6 });
@@ -130,6 +150,13 @@ export class ViewportPanel {
     const axesHelper = new THREE.AxesHelper(0.15);
     group.add(axesHelper);
 
+    // Invisible hit sphere for click selection (much larger than visual mesh)
+    const hitSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3, 8, 8),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    group.add(hitSphere);
+
     return group;
   }
 
@@ -154,7 +181,7 @@ export class ViewportPanel {
       seen.add(drone.id);
       let mesh = this.droneMeshes.get(drone.id);
       if (!mesh) {
-        mesh = this.buildDroneMesh(drone.id === swarm.selectedDroneId);
+        mesh = this.buildDroneMesh(drone.id, drone.id === swarm.selectedDroneId);
         this.scene.add(mesh);
         this.droneMeshes.set(drone.id, mesh);
       }
@@ -288,6 +315,27 @@ export class ViewportPanel {
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   };
+
+  private onClickSelect(event: MouseEvent): void {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    // Find closest drone mesh
+    let closestId = -1;
+    let closestDist = Infinity;
+    for (const [id, group] of this.droneMeshes) {
+      const intersects = this.raycaster.intersectObject(group, true);
+      if (intersects.length > 0 && intersects[0].distance < closestDist) {
+        closestDist = intersects[0].distance;
+        closestId = id;
+      }
+    }
+    if (closestId >= 0 && this.onDroneSelected) {
+      this.onDroneSelected(closestId);
+    }
+  }
 
   /** Clear all trail lines (call on reset/reform). */
   clearTrails(): void {

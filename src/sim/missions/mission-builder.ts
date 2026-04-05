@@ -107,6 +107,47 @@ export function buildPatrolMissionSteps(opts: PatrolMissionOpts): MissionStep[] 
   return steps;
 }
 
+/**
+ * Build consensus (leaderless) mission steps.
+ * Every drone gets its own offset-adjusted waypoints.
+ */
+export function buildConsensusMissionSteps(opts: {
+  droneCount: number;
+  centroidRoute: [number, number, number][];
+  speed: number;
+  center: [number, number, number];
+  spacing: number;
+  pattern: 'line' | 'grid' | 'circle';
+  killDroneId?: number;
+  killTime?: number;
+}): MissionStep[] {
+  const steps: MissionStep[] = [];
+  const positions = computeSpawnPositions(opts.droneCount, opts.pattern, opts.spacing, opts.center);
+
+  steps.push({ time: 0, droneId: 'all', action: 'arm' });
+  for (let i = 0; i < positions.length; i++) {
+    steps.push({ time: 0.5, droneId: i, action: 'hover', params: { position: positions[i], yaw: 0 } });
+  }
+  steps.push({ time: 2, droneId: 'all', action: 'formation-enable' });
+
+  // Each drone gets offset-adjusted waypoints
+  for (let i = 0; i < opts.droneCount; i++) {
+    const off = positions[i];
+    const droneWps = opts.centroidRoute.map(wp => ({
+      position: [wp[0] + (off[0] - opts.center[0]), wp[1] + (off[1] - opts.center[1]), wp[2]] as [number, number, number],
+      yaw: 0,
+      speed: opts.speed,
+    }));
+    steps.push({ time: 3, droneId: i, action: 'set-mission-plan', params: { waypoints: droneWps } });
+  }
+
+  if (opts.killDroneId !== undefined && opts.killTime !== undefined) {
+    steps.push({ time: opts.killTime, droneId: opts.killDroneId, action: 'kill-drone' });
+  }
+
+  return steps;
+}
+
 function computeSpawnPositions(
   n: number, pattern: 'line' | 'grid' | 'circle', spacing: number,
   center: [number, number, number],

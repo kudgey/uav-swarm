@@ -154,7 +154,7 @@ export class ScenarioRunner {
       return maxErr;
     }
     if (metric === 'formationRMS') {
-      return computeTruthFormationRMS(sm.drones, sm.formationManager['topology'], sm.formationManager.getLeaderId());
+      return computeTruthFormationRMS(sm.drones, (id) => sm.formationManager.getOffset(id), sm.formationManager.getLeaderId());
     }
     return Infinity;
   }
@@ -352,7 +352,7 @@ export class ScenarioRunner {
       avgCommLatency: sm.commSystem.deliveredCount > 0
         ? sm.commSystem.totalLatency / sm.commSystem.deliveredCount : 0,
       formationRMS: sm.formationManager['config'].enabled
-        ? computeTruthFormationRMS(sm.drones, sm.formationManager['topology'], sm.formationManager.getLeaderId())
+        ? computeTruthFormationRMS(sm.drones, (id) => sm.formationManager.getOffset(id), sm.formationManager.getLeaderId())
         : NaN,
       innovationGatedFraction: mean(accums.map(a => a.innovTotalCount > 0 ? a.innovGatedCount / a.innovTotalCount : 0)),
       flowValidFraction: mean(accums.map(a => a.sampleCount > 0 ? a.flowValidCount / a.sampleCount : 0)),

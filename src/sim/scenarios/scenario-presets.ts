@@ -4,7 +4,7 @@
  */
 
 import { defaultSimConfig } from '@sim/core/config-defaults';
-import type { ScenarioDefinition } from './scenario-types';
+import type { ScenarioDefinition, MissionStep } from './scenario-types';
 import { registerSubsystem } from '@sim/core/status-labels';
 
 registerSubsystem('scenario-presets', 'experimental', '22 validation presets');
@@ -300,7 +300,7 @@ export const mcFormation: ScenarioDefinition = {
 
 // ── Long-range patrol (uses shared mission builder) ──
 
-import { buildPatrolMissionSteps, buildPatrolConfig } from '@sim/missions/mission-builder';
+import { buildPatrolMissionSteps, buildPatrolConfig, buildConsensusMissionSteps } from '@sim/missions/mission-builder';
 
 export const longRangePatrol: ScenarioDefinition = (() => {
   const c = buildPatrolConfig({ droneCount: 5, pattern: 'line', spacing: 3, distance: 100 });
@@ -336,6 +336,51 @@ export const longRangePatrolWithLoss: ScenarioDefinition = (() => {
   };
 })();
 
+// ── Consensus (leaderless) presets — uses shared builder ──
+
+const CONSENSUS_CENTER: [number, number, number] = [5, 5, -2];
+
+export const consensusTransit: ScenarioDefinition = {
+  name: 'consensus-transit', description: 'Leaderless consensus transit 50m out and back',
+  config: buildPatrolConfig({ droneCount: 4, pattern: 'line', spacing: 3, distance: 50, consensusMode: true }),
+  duration: 2 * 50 / 1.5 + 10,
+  mission: { steps: buildConsensusMissionSteps({
+    droneCount: 4, speed: 1.5, center: CONSENSUS_CENTER, spacing: 3, pattern: 'line',
+    centroidRoute: [[CONSENSUS_CENTER[0] + 50, CONSENSUS_CENTER[1], CONSENSUS_CENTER[2]], CONSENSUS_CENTER],
+  }) },
+  acceptanceCriteria: { maxCollisionCount: 0 },
+};
+
+export const consensusLoss: ScenarioDefinition = {
+  name: 'consensus-loss', description: 'Leaderless transit with drone loss at t=15s',
+  config: buildPatrolConfig({ droneCount: 5, pattern: 'line', spacing: 3, distance: 50, consensusMode: true }),
+  duration: 2 * 50 / 1.5 + 15,
+  mission: { steps: buildConsensusMissionSteps({
+    droneCount: 5, speed: 1.5, center: CONSENSUS_CENTER, spacing: 3, pattern: 'line',
+    centroidRoute: [[CONSENSUS_CENTER[0] + 50, CONSENSUS_CENTER[1], CONSENSUS_CENTER[2]], CONSENSUS_CENTER],
+    killDroneId: 2, killTime: 15,
+  }) },
+  acceptanceCriteria: { maxCollisionCount: 0 },
+};
+
+export const consensusPatrol: ScenarioDefinition = (() => {
+  const wpCount = 5;
+  const distance = 100;
+  const centroid: [number, number, number][] = [];
+  for (let j = 1; j <= wpCount; j++) centroid.push([CONSENSUS_CENTER[0] + distance * j / wpCount, CONSENSUS_CENTER[1], CONSENSUS_CENTER[2]]);
+  for (let j = wpCount - 1; j >= 0; j--) centroid.push([CONSENSUS_CENTER[0] + distance * j / wpCount, CONSENSUS_CENTER[1], CONSENSUS_CENTER[2]]);
+  return {
+    name: 'consensus-patrol', description: 'GPS-denied leaderless 100m patrol',
+    config: buildPatrolConfig({ droneCount: 5, pattern: 'line', spacing: 3, distance, consensusMode: true }),
+    duration: 2 * distance / 1.5 + 10,
+    mission: { steps: buildConsensusMissionSteps({
+      droneCount: 5, speed: 1.5, center: CONSENSUS_CENTER, spacing: 3, pattern: 'line',
+      centroidRoute: centroid,
+    }) },
+    acceptanceCriteria: { maxCollisionCount: 0 },
+  };
+})();
+
 // ── Registry ──
 
 export const ALL_PRESETS: ScenarioDefinition[] = [
@@ -346,6 +391,7 @@ export const ALL_PRESETS: ScenarioDefinition[] = [
   delaySpike, uwbNlosSwarm, delayedNeighborAvoidance,
   mcHover, mcFormation,
   longRangePatrol, longRangePatrolWithLoss,
+  consensusTransit, consensusLoss, consensusPatrol,
 ];
 
 export function getPresetByName(name: string): ScenarioDefinition | undefined {

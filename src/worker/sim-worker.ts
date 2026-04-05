@@ -8,7 +8,9 @@ import { z } from 'zod';
 import { simConfigSchema } from '@sim/core/config-schema';
 import { defaultSimConfig } from '@sim/core/config-defaults';
 import { computeSwarmSafetyMetrics } from '@sim/safety/safety-metrics';
+import { computeTruthFormationRMS } from '@sim/swarm/formation-metrics';
 import { ScenarioRunner } from '@sim/scenarios/scenario-runner';
+import { type DroneAccum, newAccum, sampleDroneMetrics, rms, meanOf, maxOf } from '@sim/metrics/mission-accum';
 import type { SimConfig } from '@sim/core/types';
 import type {
   WorkerCommand, SwarmSnapshot, DroneSnapshot, SensorSnapshot,
@@ -50,6 +52,12 @@ let missionStepIdx = 0;
 let missionDuration = 0;
 let missionStartStep = 0;
 let missionWallStart = 0;
+
+// ── Mission metrics accumulators ──
+let missionAccums: DroneAccum[] = [];
+let missionSampleInterval = 0;
+let lastMissionSampleStep = 0;
+let missionLaunchCentroid = [0, 0, 0];
 
 // ── Flight log recorder ──
 const LOG_RATE_HZ = 10;
@@ -213,6 +221,35 @@ function onFrame(): void {
         missionStepIdx++;
       }
       sampleFlightLog();
+      // Sample metrics at controller rate
+      if (ctx.stepCount - lastMissionSampleStep >= missionSampleInterval) {
+        lastMissionSampleStep = ctx.stepCount;
+        const sm = ctx.swarmManager;
+        for (let di = 0; di < sm.drones.length; di++) {
+          const d = sm.drones[di];
+          if (d.destroyed) continue;
+          const est = d.ekf.getEstimate();
+          const guide = d.controller.evaluateGuidanceOnly(est);
+          const safe = d.safeGuidance;
+          const r = d.sensorManager.getLatestReadings();
+          const innovs = d.ekf.getInnovationLogger().getRecent(1);
+          sampleDroneMetrics(
+            missionAccums[di],
+            d.state.position, est.position, est.velocity, d.state.velocity,
+            d.state.quaternion, est.quaternion,
+            guide.positionDes, safe?.positionDes,
+            d.state.motorSpeeds, config.drone.motorOmegaMax, config.drone.numRotors,
+            ctx.simTime,
+            {
+              flowValid: r.opticalFlow?.valid ?? false,
+              vioValid: r.cameraVIO?.valid ?? false,
+              innovGated: innovs.length > 0 && innovs[0].gated,
+              innovNorm: innovs.length > 0 ? innovs[0].innovationNorm : 0,
+              hasInnov: innovs.length > 0,
+            },
+          );
+        }
+      }
       // Check if mission is done
       if (missionTime >= missionDuration) {
         missionActive = false;
@@ -221,6 +258,19 @@ function onFrame(): void {
         post({ type: 'state', snapshot: snap });
         // Send flight log CSV
         post({ type: 'mission-log', csv: logLines.join('\n') });
+        // Aggregate real metrics
+        const sm = ctx.swarmManager;
+        const fmEnabled = sm.formationManager['config'].enabled;
+        let formationRMS = NaN;
+        if (fmEnabled) {
+          try { formationRMS = computeTruthFormationRMS(sm.drones, (id) => sm.formationManager.getOffset(id), sm.formationManager.getLeaderId()); } catch {}
+        }
+        // Return drift: distance from launch centroid
+        let endCx = 0, endCy = 0, endCz = 0, aliveN = 0;
+        for (const d of sm.drones) { if (!d.destroyed) { endCx += d.state.position[0]; endCy += d.state.position[1]; endCz += d.state.position[2]; aliveN++; } }
+        if (aliveN > 0) { endCx /= aliveN; endCy /= aliveN; endCz /= aliveN; }
+        const returnDrift = Math.sqrt((endCx - missionLaunchCentroid[0]) ** 2 + (endCy - missionLaunchCentroid[1]) ** 2 + (endCz - missionLaunchCentroid[2]) ** 2);
+
         post({
           type: 'mission-complete',
           metrics: {
@@ -229,13 +279,14 @@ function onFrame(): void {
             avgSeparation: snap.safetyMetrics.avgSeparation,
             safetyOverrideCount: snap.safetyMetrics.safetyOverrideCount,
             emergencyStopCount: snap.safetyMetrics.emergencyStopCount,
-            rmsExecutedTrackingError: 0,
-            rmsEstimationError: 0,
-            rmsAltitudeError: 0,
-            maxHorizontalDrift: 0,
-            formationRMS: NaN,
-            packetDeliveryRate: ctx.swarmManager.commSystem.sentCount > 0
-              ? ctx.swarmManager.commSystem.deliveredCount / ctx.swarmManager.commSystem.sentCount : 1,
+            rmsExecutedTrackingError: meanOf(missionAccums.map(a => rms(a.executedTrackingSqSum, a.sampleCount))),
+            rmsEstimationError: meanOf(missionAccums.map(a => rms(a.estimationSqSum, a.sampleCount))),
+            rmsAltitudeError: meanOf(missionAccums.map(a => rms(a.altitudeSqSum, a.sampleCount))),
+            maxHorizontalDrift: maxOf(missionAccums.map(a => a.maxHorizDrift)),
+            formationRMS,
+            returnDrift,
+            packetDeliveryRate: sm.commSystem.sentCount > 0
+              ? sm.commSystem.deliveredCount / sm.commSystem.sentCount : 1,
             realTimeFactor: missionDuration / Math.max(0.001, (performance.now() - missionWallStart) / 1000),
           },
         });
@@ -509,6 +560,15 @@ self.onmessage = (e: MessageEvent) => {
       missionActive = true;
       missionWallStart = performance.now();
       initFlightLog();
+      // Init metrics accumulators
+      missionAccums = ctx.swarmManager.drones.map(() => newAccum());
+      missionSampleInterval = Math.round(1 / (config.physicsDt * config.commandRate));
+      lastMissionSampleStep = 0;
+      // Record launch centroid for return drift
+      let cx = 0, cy = 0, cz = 0;
+      for (const d of ctx.swarmManager.drones) { cx += d.state.position[0]; cy += d.state.position[1]; cz += d.state.position[2]; }
+      const n = ctx.swarmManager.drones.length;
+      missionLaunchCentroid = [cx / n, cy / n, cz / n];
       // Start the sim loop
       running = true;
       lastWallTime = performance.now();

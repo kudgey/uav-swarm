@@ -20,16 +20,16 @@ export class TelemetryChart {
   constructor(parent: HTMLElement, title: string, _width = 300, _height = 120) {
 
     this.wrapper = document.createElement('div');
-    this.wrapper.style.cssText = 'flex:1;min-width:200px;display:flex;flex-direction:column;';
+    this.wrapper.style.cssText = 'flex:1;min-width:180px;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
     parent.appendChild(this.wrapper);
 
     const label = document.createElement('div');
     label.textContent = title;
-    label.style.cssText = 'color:var(--text-secondary);font-family:var(--font-ui);font-size:var(--font-size-xs);margin-bottom:2px;font-weight:500;';
+    label.style.cssText = 'color:var(--text-secondary);font-family:var(--font-ui);font-size:var(--font-size-xs);line-height:1;margin-bottom:2px;font-weight:500;flex-shrink:0;';
     this.wrapper.appendChild(label);
 
     this.canvas = document.createElement('canvas');
-    this.canvas.style.cssText = 'width:100%;flex:1;background:var(--bg-tertiary);border-radius:var(--radius);';
+    this.canvas.style.cssText = 'width:100%;flex:1;min-height:0;background:var(--bg-tertiary);border-radius:var(--radius);';
     this.wrapper.appendChild(this.canvas);
 
     this.ctx = this.canvas.getContext('2d')!;

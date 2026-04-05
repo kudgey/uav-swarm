@@ -46,6 +46,8 @@ export class App {
   private velChart!: TelemetryChart;
   private motorChart!: TelemetryChart;
   private lastFlightLog = '';
+  private statusBar!: HTMLDivElement;
+  private chartLabel!: HTMLDivElement;
 
   constructor(private root: HTMLElement) {
     injectTheme();
@@ -59,26 +61,45 @@ export class App {
     style.textContent = `
       .app-layout {
         display: grid;
-        grid-template-rows: 1fr 180px;
+        grid-template-rows: 32px 1fr 200px;
         grid-template-columns: 300px 1fr;
         width: 100%; height: 100%;
       }
-      .app-sidebar {
+      .app-status-bar {
+        grid-column: 1 / -1;
         grid-row: 1;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 12px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        font-family: var(--font-ui);
+        font-size: var(--font-size-sm);
+        color: var(--text-secondary);
+        overflow: hidden;
+        white-space: nowrap;
+      }
+      .app-status-bar .status-value { color: var(--text-primary); font-weight: 600; font-family: var(--font-mono); }
+      .app-status-bar .status-sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; }
+      .app-status-bar .status-progress { height: 4px; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
+      .app-sidebar {
+        grid-row: 2;
         overflow-y: auto;
         border-right: 1px solid var(--border);
         background: var(--bg-primary);
       }
-      .app-viewport { grid-row: 1; min-height: 0; }
+      .app-viewport { grid-row: 2; min-height: 0; }
       .app-charts {
         grid-column: 1 / -1;
         border-top: 1px solid var(--border);
-        padding: 8px;
+        padding: 6px 8px;
         display: flex;
         gap: 8px;
         overflow: hidden;
         background: var(--bg-secondary);
         align-items: stretch;
+        min-height: 0;
       }
       .advanced-toggle {
         padding: 8px 12px; font-size: 11px; color: var(--text-muted);
@@ -92,16 +113,16 @@ export class App {
       @media (max-width: 700px) {
         .app-layout {
           grid-template-columns: 1fr;
-          grid-template-rows: auto 1fr auto;
+          grid-template-rows: 32px auto 1fr auto;
         }
         .app-sidebar {
-          grid-row: 1;
+          grid-row: 2;
           max-height: 40vh;
           border-right: none;
           border-bottom: 1px solid var(--border);
         }
-        .app-viewport { grid-row: 2; }
-        .app-charts { grid-row: 3; min-height: 100px; flex-wrap: wrap; max-height: none; }
+        .app-viewport { grid-row: 3; }
+        .app-charts { grid-row: 4; min-height: 100px; flex-wrap: wrap; max-height: none; }
       }
     `;
     document.head.appendChild(style);
@@ -109,6 +130,44 @@ export class App {
     const layout = document.createElement('div');
     layout.className = 'app-layout';
     this.root.appendChild(layout);
+
+    // Status bar
+    this.statusBar = document.createElement('div');
+    this.statusBar.className = 'app-status-bar';
+    const sbItems = [
+      ['Drones', 'sb-drones', '0'],
+      ['Selected', 'sb-selected', 'D0'],
+      ['t', 'sb-time', '0.0s'],
+      ['Min sep', 'sb-minsep', '--'],
+      ['Collisions', 'sb-collisions', '0'],
+    ];
+    for (let i = 0; i < sbItems.length; i++) {
+      if (i > 0) { const sep = document.createElement('span'); sep.className = 'status-sep'; this.statusBar.appendChild(sep); }
+      const [label, id, def] = sbItems[i];
+      const span = document.createElement('span');
+      span.textContent = label + ': ';
+      const val = document.createElement('span');
+      val.className = 'status-value';
+      val.id = id;
+      val.textContent = def;
+      span.appendChild(val);
+      this.statusBar.appendChild(span);
+    }
+    // Mission progress bar
+    const sep = document.createElement('span'); sep.className = 'status-sep'; this.statusBar.appendChild(sep);
+    const progWrap = document.createElement('span');
+    progWrap.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    progWrap.textContent = 'Mission: ';
+    const progTrack = document.createElement('span');
+    progTrack.style.cssText = 'width:80px;height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;';
+    const progFill = document.createElement('span');
+    progFill.className = 'status-progress';
+    progFill.id = 'sb-progress';
+    progFill.style.cssText = 'display:block;height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s;';
+    progTrack.appendChild(progFill);
+    progWrap.appendChild(progTrack);
+    this.statusBar.appendChild(progWrap);
+    layout.appendChild(this.statusBar);
 
     // Sidebar: Mission Panel + Advanced
     const sidebar = document.createElement('div');
@@ -162,11 +221,24 @@ export class App {
     viewportContainer.className = 'app-viewport';
     layout.appendChild(viewportContainer);
     this.viewport = new ViewportPanel(viewportContainer);
+    this.viewport.onDroneSelected = (id) => {
+      this.sendCommand({ type: 'select-drone', droneId: id });
+      // Clear charts to show new drone's data
+      this.posChart.clear();
+      this.velChart.clear();
+      this.motorChart.clear();
+    };
 
     // Charts
     const chartsRow = document.createElement('div');
     chartsRow.className = 'app-charts';
     layout.appendChild(chartsRow);
+
+    // Chart drone label
+    this.chartLabel = document.createElement('div');
+    this.chartLabel.style.cssText = 'writing-mode:vertical-lr;text-orientation:mixed;font-family:var(--font-ui);font-size:var(--font-size-xs);color:var(--text-muted);padding:0 2px;display:flex;align-items:center;flex-shrink:0;';
+    this.chartLabel.textContent = 'D0';
+    chartsRow.appendChild(this.chartLabel);
 
     this.posChart = new TelemetryChart(chartsRow, 'Position (m)');
     this.posChart.addSeries('X', '#ff6666');
@@ -245,6 +317,25 @@ export class App {
       commLinkCount: swarm.commLinks.length });
     this.formationPanel.update(swarm);
     this.safetyPanel.update(swarm);
+
+    // Status bar
+    const sbDrones = document.getElementById('sb-drones');
+    const sbSelected = document.getElementById('sb-selected');
+    const sbTime = document.getElementById('sb-time');
+    const sbMinSep = document.getElementById('sb-minsep');
+    const sbCollisions = document.getElementById('sb-collisions');
+    if (sbDrones) sbDrones.textContent = String(swarm.drones.length);
+    if (sbSelected) sbSelected.textContent = `D${drone.id}`;
+    if (sbTime) sbTime.textContent = `${swarm.simTime.toFixed(1)}s`;
+    if (sbMinSep) sbMinSep.textContent = swarm.safetyMetrics.minSeparation === Infinity ? '--' : `${swarm.safetyMetrics.minSeparation.toFixed(2)}m`;
+    if (sbCollisions) sbCollisions.textContent = String(swarm.safetyMetrics.collisionCount);
+
+    // Mission progress bar
+    const sbProgress = document.getElementById('sb-progress');
+    if (sbProgress) sbProgress.style.width = `${this.missionPanel.getProgressPercent()}%`;
+
+    // Chart drone label
+    this.chartLabel.textContent = `D${drone.id}`;
 
     // Charts
     this.posChart.pushData(swarm.simTime, drone.position);

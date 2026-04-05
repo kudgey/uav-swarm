@@ -6,26 +6,25 @@
 
 import type { Vec3 } from '@sim/core/types';
 import type { DroneInstance } from './drone-instance';
-import type { FormationTopology } from './formation-types';
 
 /**
  * Compute truth-based formation error for each drone.
- * Returns per-drone error vectors (truth position - desired formation position).
+ * Uses getOffset callback to respect offsetMap (sparse IDs after reconfigure).
  */
 export function computeTruthFormationErrors(
   drones: DroneInstance[],
-  topology: FormationTopology,
+  getOffset: (droneId: number) => Vec3,
   leaderId: number,
 ): { droneId: number; error: Vec3 }[] {
   const errors: { droneId: number; error: Vec3 }[] = [];
-  const leader = drones.find(d => d.id === leaderId);
+  const aliveDrones = drones.filter(d => !d.destroyed);
+  const leader = aliveDrones.find(d => d.id === leaderId);
   if (!leader) return errors;
 
-  const leaderOffset = topology.offsets[leaderId] ?? new Float64Array(3);
+  const leaderOffset = getOffset(leaderId);
 
-  for (const d of drones) {
-    const myOffset = topology.offsets[d.id] ?? new Float64Array(3);
-    // Desired truth position = leader truth pos + (myOffset - leaderOffset)
+  for (const d of aliveDrones) {
+    const myOffset = getOffset(d.id);
     const desX = leader.state.position[0] + myOffset[0] - leaderOffset[0];
     const desY = leader.state.position[1] + myOffset[1] - leaderOffset[1];
     const desZ = leader.state.position[2] + myOffset[2] - leaderOffset[2];
@@ -46,10 +45,10 @@ export function computeTruthFormationErrors(
 /** Compute RMS formation error from truth. */
 export function computeTruthFormationRMS(
   drones: DroneInstance[],
-  topology: FormationTopology,
+  getOffset: (droneId: number) => Vec3,
   leaderId: number,
 ): number {
-  const errors = computeTruthFormationErrors(drones, topology, leaderId);
+  const errors = computeTruthFormationErrors(drones, getOffset, leaderId);
   if (errors.length === 0) return 0;
   let sumSq = 0;
   for (const e of errors) {

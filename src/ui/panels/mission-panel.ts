@@ -8,7 +8,7 @@
 import type { WorkerCommand, SwarmSnapshot } from '@worker/worker-protocol';
 import type { SimConfig } from '@sim/core/types';
 import { defaultSimConfig } from '@sim/core/config-defaults';
-import { buildPatrolMissionSteps, buildPatrolConfig } from '@sim/missions/mission-builder';
+import { buildPatrolMissionSteps, buildPatrolConfig, buildConsensusMissionSteps } from '@sim/missions/mission-builder';
 
 export type MissionType =
   | 'formation-transit'
@@ -210,13 +210,17 @@ export function buildVisualMissionSteps(opts: {
       break;
     }
 
-    // ── Formation hold under wind ──
+    // ── Formation hold under wind: two temporal gusts with recovery ──
     case 'formation-hold-wind': {
-      // Just hold formation, wind hits at t=4 and t=8 (two gusts)
-      steps.push({
-        time: 4, droneId: 'all', action: 'inject-fault',
-        params: { type: 'wind-gust', speed: Math.max(wind, 5) },
-      });
+      const gustSpeed = Math.max(wind, 5);
+      // Gust 1: t=4 onset, t=7 recovery
+      steps.push({ time: 4, droneId: 'all', action: 'inject-fault', params: { type: 'wind-gust', speed: gustSpeed } });
+      steps.push({ time: 7, droneId: 'all', action: 'inject-fault', params: { type: 'wind-gust', speed: 0 } });
+      // Gust 2: t=10 onset from different direction, t=13 recovery
+      steps.push({ time: 10, droneId: 'all', action: 'set-environment',
+        params: { wind: { meanSpeed: gustSpeed, meanDirection: [0, 1, 0], shearEnabled: false, shearExponent: 0.14, gustEvents: [] } } });
+      steps.push({ time: 13, droneId: 'all', action: 'set-environment',
+        params: { wind: { meanSpeed: 0, meanDirection: [1, 0, 0], shearEnabled: false, shearExponent: 0.14, gustEvents: [] } } });
       break;
     }
 
@@ -274,56 +278,29 @@ export function buildVisualMissionSteps(opts: {
     // Each drone gets OFFSET-ADJUSTED waypoints: centroid route + own pattern offset.
     // No formation-enable, no leader. Consensus progress sync keeps them aligned.
 
-    case 'consensus-transit': {
-      const centroidRoute: [number, number, number][] = [
-        [center[0] + distance, center[1], center[2]],
-        [center[0], center[1], center[2]],
-      ];
-      for (let i = 0; i < droneCount; i++) {
-        const off = hoverTargets[i];
-        const droneWps = centroidRoute.map(wp => ({
-          position: [wp[0] + (off[0] - center[0]), wp[1] + (off[1] - center[1]), wp[2]] as [number, number, number],
-          yaw: 0, speed,
-        }));
-        steps.push({ time: 3, droneId: i, action: 'set-mission-plan', params: { waypoints: droneWps } });
-      }
-      break;
-    }
+    case 'consensus-transit':
+      return buildConsensusMissionSteps({
+        droneCount, speed, center, spacing, pattern,
+        centroidRoute: [[center[0] + distance, center[1], center[2]], center],
+      });
 
-    case 'consensus-loss': {
-      const centroidRoute: [number, number, number][] = [
-        [center[0] + distance * 0.5, center[1], center[2]],
-        [center[0] + distance, center[1], center[2]],
-        [center[0], center[1], center[2]],
-      ];
-      for (let i = 0; i < droneCount; i++) {
-        const off = hoverTargets[i];
-        const droneWps = centroidRoute.map(wp => ({
-          position: [wp[0] + (off[0] - center[0]), wp[1] + (off[1] - center[1]), wp[2]] as [number, number, number],
-          yaw: 0, speed,
-        }));
-        steps.push({ time: 3, droneId: i, action: 'set-mission-plan', params: { waypoints: droneWps } });
-      }
-      const killTime = Math.max(6, legTime * 0.4);
-      steps.push({ time: killTime, droneId: 2, action: 'kill-drone' });
-      break;
-    }
+    case 'consensus-loss':
+      return buildConsensusMissionSteps({
+        droneCount, speed, center, spacing, pattern,
+        centroidRoute: [
+          [center[0] + distance * 0.5, center[1], center[2]],
+          [center[0] + distance, center[1], center[2]],
+          center,
+        ],
+        killDroneId: 2, killTime: Math.max(6, legTime * 0.4),
+      });
 
     case 'consensus-patrol': {
       const wpCount = Math.max(3, Math.ceil(distance / 20));
       const centroidRoute: [number, number, number][] = [];
       for (let j = 1; j <= wpCount; j++) centroidRoute.push([center[0] + distance * j / wpCount, center[1], center[2]]);
       for (let j = wpCount - 1; j >= 0; j--) centroidRoute.push([center[0] + distance * j / wpCount, center[1], center[2]]);
-
-      for (let i = 0; i < droneCount; i++) {
-        const off = hoverTargets[i];
-        const droneWps = centroidRoute.map(wp => ({
-          position: [wp[0] + (off[0] - center[0]), wp[1] + (off[1] - center[1]), wp[2]] as [number, number, number],
-          yaw: 0, speed,
-        }));
-        steps.push({ time: 3, droneId: i, action: 'set-mission-plan', params: { waypoints: droneWps } });
-      }
-      break;
+      return buildConsensusMissionSteps({ droneCount, speed, center, spacing, pattern, centroidRoute });
     }
   }
 
@@ -515,6 +492,13 @@ export class MissionPanel {
     this.updatePhase('formed');
   }
 
+  /** Get mission progress 0-100 (for status bar). */
+  getProgressPercent(): number {
+    if (this.phase !== 'running' || !Number.isFinite(this.missionStartTime)) return 0;
+    return this._lastProgressPct;
+  }
+  private _lastProgressPct = 0;
+
   buildConfig(): SimConfig {
     return buildMissionConfig(
       parseInt(this.droneCountInput.value) || 5,
@@ -535,6 +519,7 @@ export class MissionPanel {
       if (!Number.isFinite(this.missionStartTime)) this.missionStartTime = swarm.simTime;
       const simTime = swarm.simTime - this.missionStartTime;
       const pct = Math.min(100, (simTime / this.missionDuration) * 100);
+      this._lastProgressPct = pct;
       this.progressFill.style.width = pct + '%';
       this.progressLabel.textContent = `${simTime.toFixed(1)}s / ${this.missionDuration}s`;
 
@@ -573,6 +558,7 @@ export class MissionPanel {
       `Estimation error:    ${(metrics.rmsEstimationError ?? 0).toFixed(3)}m`,
       `Altitude error RMS:  ${(metrics.rmsAltitudeError ?? 0).toFixed(3)}m`,
       `Max horiz drift:     ${(metrics.maxHorizontalDrift ?? 0).toFixed(2)}m`,
+      `Return drift:        ${(metrics.returnDrift ?? 0).toFixed(2)}m`,
       `Formation RMS:       ${isNaN(metrics.formationRMS) ? 'N/A' : (metrics.formationRMS ?? 0).toFixed(3)}m`,
       `Packet delivery:     ${((metrics.packetDeliveryRate ?? 1) * 100).toFixed(0)}%`,
       `Safety overrides:    ${metrics.safetyOverrideCount ?? 0}`,
