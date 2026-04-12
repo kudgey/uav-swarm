@@ -13,6 +13,7 @@ import { isaPressure, isaTemperature, isaDensity } from './atmosphere';
 import { WindField } from './wind';
 import { TurbulenceGenerator } from './turbulence';
 import { computeGroundEffectMultiplier } from './ground-effect';
+import { computeDownwashMultiplier } from './downwash';
 import { MagneticFieldModel } from './magnetic-field';
 import { WorldGeometry } from './world-geometry';
 import type { Vec3, EnvironmentOutput, EnvironmentConfig } from '@sim/core/types';
@@ -105,6 +106,7 @@ export class EnvironmentManager {
 
     out.groundEffectMultiplier = this.config.groundEffect.enabled
       ? computeGroundEffectMultiplier(h, this.propRadius) : 1.0;
+    out.downwashMultiplier = 1.0; // overwritten by applyDownwash() if enabled
 
     this.magField.evaluate(_magOut, position);
     out.earthMagneticField[0] = _magOut[0];
@@ -112,6 +114,26 @@ export class EnvironmentManager {
     out.earthMagneticField[2] = _magOut[2];
 
     out.surfaceTextureQuality = this.worldGeo.getSurfaceTextureQuality(position);
+  }
+
+  /**
+   * Apply downwash to all drones' env outputs. Call after sampleAt for each drone.
+   * Modifies each drone's envOutput.downwashMultiplier based on drones above it.
+   */
+  applyDownwash(drones: { id: number; state: { position: Float64Array }; envOutput: EnvironmentOutput; destroyed?: boolean }[]): void {
+    if (!this.config.downwash.enabled || drones.length < 2) {
+      for (const d of drones) d.envOutput.downwashMultiplier = 1.0;
+      return;
+    }
+    const asLike = drones.map(d => ({ id: d.id, position: d.state.position, destroyed: d.destroyed }));
+    for (const d of drones) {
+      d.envOutput.downwashMultiplier = computeDownwashMultiplier(
+        { id: d.id, position: d.state.position, destroyed: d.destroyed },
+        asLike,
+        this.propRadius,
+        this.config.downwash,
+      );
+    }
   }
 
   /**

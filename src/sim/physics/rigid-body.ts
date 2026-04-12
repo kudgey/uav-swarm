@@ -84,7 +84,7 @@ export function computeDerivative(
   for (let i = 0; i < numRotors; i++) {
     totalThrust += kT * motorSpeeds[i] * motorSpeeds[i];
   }
-  totalThrust *= env.groundEffectMultiplier;
+  totalThrust *= env.groundEffectMultiplier * env.downwashMultiplier;
   v3Zero(_thrustBody);
   _thrustBody[2] = -totalThrust;  // Upward = -z in FRD
 

@@ -130,6 +130,7 @@ export interface EnvironmentConfig {
   wind: WindConfig;
   turbulence: TurbulenceConfig;
   groundEffect: { enabled: boolean; propRadiusFactor: number; wallCeilingEffectEnabled: boolean };
+  downwash: { enabled: boolean; strength: number; verticalRange: number };
   magneticField: MagneticFieldConfig;
   scene: SceneConfig;
 }
@@ -303,6 +304,7 @@ export interface EnvironmentOutput {
   earthMagneticField: Vec3;      // world-frame earth+anomaly field (T), excludes motor EMI
   heightAboveGround: number;     // m, >= 0 (clamped, 0 = on/below ground)
   groundEffectMultiplier: number; // >= 1.0
+  downwashMultiplier: number;    // <= 1.0 (0.5..1.0), thrust reduction from drones above
   surfaceTextureQuality: number; // 0-1, from scene config / surface below drone
 }
 

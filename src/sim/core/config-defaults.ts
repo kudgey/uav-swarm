@@ -57,7 +57,12 @@ export function defaultEnvironmentConfig(): EnvironmentConfig {
     groundEffect: {
       enabled: true,
       propRadiusFactor: 0.7,
-      wallCeilingEffectEnabled: false,  // Phase 11: off by default
+      wallCeilingEffectEnabled: false,
+    },
+    downwash: {
+      enabled: false,    // off by default (opt-in for tight formations)
+      strength: 0.2,
+      verticalRange: 5.0,
     },
     magneticField: {
       fieldStrength: 50e-6,   // ~50 µT
@@ -183,6 +188,7 @@ export function createDefaultEnv(): EnvironmentOutput {
     earthMagneticField: v3Create(0, 0, 0),
     heightAboveGround: 0,
     groundEffectMultiplier: 1.0,
+    downwashMultiplier: 1.0,
     surfaceTextureQuality: 0.8,
   };
 }

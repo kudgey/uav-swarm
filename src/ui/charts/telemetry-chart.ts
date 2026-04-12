@@ -16,7 +16,8 @@ export class TelemetryChart {
   private resizeObserver: ResizeObserver;
   private series: ChartSeries[] = [];
   private times: number[] = [];
-  private maxPoints = 600;
+  private maxPoints = 1800; // allow up to 60s at 30Hz
+  private timeWindowSec = 30;
   constructor(parent: HTMLElement, title: string, _width = 300, _height = 120) {
 
     this.wrapper = document.createElement('div');
@@ -53,18 +54,28 @@ export class TelemetryChart {
     return this.series.length - 1;
   }
 
+  setTimeWindow(seconds: number): void {
+    this.timeWindowSec = seconds;
+  }
+
   pushData(time: number, values: number[]): void {
     this.times.push(time);
     for (let i = 0; i < this.series.length; i++) {
       this.series[i].data.push(values[i] ?? 0);
     }
-    // Trim to max points
+    // Trim by time window (keep all samples within last N seconds)
+    const cutoff = time - this.timeWindowSec;
+    let trimIdx = 0;
+    while (trimIdx < this.times.length && this.times[trimIdx] < cutoff) trimIdx++;
+    if (trimIdx > 0) {
+      this.times.splice(0, trimIdx);
+      for (const s of this.series) s.data.splice(0, trimIdx);
+    }
+    // Hard cap to prevent memory runaway
     if (this.times.length > this.maxPoints) {
       const excess = this.times.length - this.maxPoints;
       this.times.splice(0, excess);
-      for (const s of this.series) {
-        s.data.splice(0, excess);
-      }
+      for (const s of this.series) s.data.splice(0, excess);
     }
   }
 

@@ -47,7 +47,12 @@ export class App {
   private motorChart!: TelemetryChart;
   private lastFlightLog = '';
   private statusBar!: HTMLDivElement;
-  private chartLabel!: HTMLDivElement;
+  private chartToolbar!: HTMLDivElement;
+  private droneSelect!: HTMLSelectElement;
+  private chartPaused = false;
+  private chartTimeWindow = 30; // seconds
+  private currentChartDroneId = 0;
+  private lastKnownDroneIds: number[] = [];
 
   constructor(private root: HTMLElement) {
     injectTheme();
@@ -61,10 +66,35 @@ export class App {
     style.textContent = `
       .app-layout {
         display: grid;
-        grid-template-rows: 32px 1fr 200px;
+        grid-template-rows: 32px 1fr 28px 200px;
         grid-template-columns: 300px 1fr;
         width: 100%; height: 100%;
       }
+      .app-chart-toolbar {
+        grid-column: 1 / -1;
+        grid-row: 3;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 10px;
+        background: var(--bg-secondary);
+        border-top: 1px solid var(--border);
+        font-family: var(--font-ui);
+        font-size: var(--font-size-sm);
+        color: var(--text-secondary);
+      }
+      .app-chart-toolbar select, .app-chart-toolbar button {
+        font-family: var(--font-ui);
+        font-size: var(--font-size-sm);
+        padding: 2px 8px;
+        border: 1px solid var(--border);
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        border-radius: var(--radius);
+        cursor: pointer;
+      }
+      .app-chart-toolbar button:hover { background: var(--bg-hover); }
+      .app-chart-toolbar button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
       .app-status-bar {
         grid-column: 1 / -1;
         grid-row: 1;
@@ -92,7 +122,7 @@ export class App {
       .app-viewport { grid-row: 2; min-height: 0; }
       .app-charts {
         grid-column: 1 / -1;
-        border-top: 1px solid var(--border);
+        grid-row: 4;
         padding: 6px 8px;
         display: flex;
         gap: 8px;
@@ -113,7 +143,7 @@ export class App {
       @media (max-width: 700px) {
         .app-layout {
           grid-template-columns: 1fr;
-          grid-template-rows: 32px auto 1fr auto;
+          grid-template-rows: 32px auto 1fr 28px auto;
         }
         .app-sidebar {
           grid-row: 2;
@@ -122,7 +152,8 @@ export class App {
           border-bottom: 1px solid var(--border);
         }
         .app-viewport { grid-row: 3; }
-        .app-charts { grid-row: 4; min-height: 100px; flex-wrap: wrap; max-height: none; }
+        .app-chart-toolbar { grid-row: 4; }
+        .app-charts { grid-row: 5; min-height: 100px; flex-wrap: wrap; max-height: none; }
       }
     `;
     document.head.appendChild(style);
@@ -223,22 +254,73 @@ export class App {
     this.viewport = new ViewportPanel(viewportContainer);
     this.viewport.onDroneSelected = (id) => {
       this.sendCommand({ type: 'select-drone', droneId: id });
-      // Clear charts to show new drone's data
-      this.posChart.clear();
-      this.velChart.clear();
-      this.motorChart.clear();
+      this.currentChartDroneId = id;
+      this.droneSelect.value = String(id);
+      this.clearCharts();
     };
+
+    // Chart toolbar
+    this.chartToolbar = document.createElement('div');
+    this.chartToolbar.className = 'app-chart-toolbar';
+    layout.appendChild(this.chartToolbar);
+
+    // Drone selector
+    const droneLabel = document.createElement('span');
+    droneLabel.textContent = 'Drone:';
+    this.chartToolbar.appendChild(droneLabel);
+    this.droneSelect = document.createElement('select');
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '0'; defaultOpt.textContent = 'D0';
+    this.droneSelect.appendChild(defaultOpt);
+    this.droneSelect.addEventListener('change', () => {
+      const id = parseInt(this.droneSelect.value);
+      this.currentChartDroneId = id;
+      this.sendCommand({ type: 'select-drone', droneId: id });
+      this.clearCharts();
+    });
+    this.chartToolbar.appendChild(this.droneSelect);
+
+    // Time window
+    const windowLabel = document.createElement('span');
+    windowLabel.textContent = 'Window:';
+    windowLabel.style.marginLeft = '8px';
+    this.chartToolbar.appendChild(windowLabel);
+    for (const sec of [10, 30, 60]) {
+      const btn = document.createElement('button');
+      btn.textContent = `${sec}s`;
+      if (sec === this.chartTimeWindow) btn.classList.add('active');
+      btn.addEventListener('click', () => {
+        this.chartTimeWindow = sec;
+        this.chartToolbar.querySelectorAll('button.window-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.posChart.setTimeWindow(sec);
+        this.velChart.setTimeWindow(sec);
+        this.motorChart.setTimeWindow(sec);
+      });
+      btn.classList.add('window-btn');
+      this.chartToolbar.appendChild(btn);
+    }
+
+    // Pause / Clear
+    const spacer = document.createElement('span'); spacer.style.flex = '1'; this.chartToolbar.appendChild(spacer);
+    const pauseBtn = document.createElement('button');
+    pauseBtn.textContent = 'Pause';
+    pauseBtn.addEventListener('click', () => {
+      this.chartPaused = !this.chartPaused;
+      pauseBtn.textContent = this.chartPaused ? 'Resume' : 'Pause';
+      pauseBtn.classList.toggle('active', this.chartPaused);
+    });
+    this.chartToolbar.appendChild(pauseBtn);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear';
+    clearBtn.addEventListener('click', () => this.clearCharts());
+    this.chartToolbar.appendChild(clearBtn);
 
     // Charts
     const chartsRow = document.createElement('div');
     chartsRow.className = 'app-charts';
     layout.appendChild(chartsRow);
-
-    // Chart drone label
-    this.chartLabel = document.createElement('div');
-    this.chartLabel.style.cssText = 'writing-mode:vertical-lr;text-orientation:mixed;font-family:var(--font-ui);font-size:var(--font-size-xs);color:var(--text-muted);padding:0 2px;display:flex;align-items:center;flex-shrink:0;';
-    this.chartLabel.textContent = 'D0';
-    chartsRow.appendChild(this.chartLabel);
 
     this.posChart = new TelemetryChart(chartsRow, 'Position (m)');
     this.posChart.addSeries('X', '#ff6666');
@@ -334,13 +416,47 @@ export class App {
     const sbProgress = document.getElementById('sb-progress');
     if (sbProgress) sbProgress.style.width = `${this.missionPanel.getProgressPercent()}%`;
 
-    // Chart drone label
-    this.chartLabel.textContent = `D${drone.id}`;
+    // Sync drone dropdown options if drone count changed
+    this.syncDroneDropdown(swarm.drones.map(d => d.id));
 
-    // Charts
-    this.posChart.pushData(swarm.simTime, drone.position);
-    this.velChart.pushData(swarm.simTime, [...drone.velocity]);
-    this.motorChart.pushData(swarm.simTime, [...drone.motorSpeeds]);
+    // Which drone to chart: toolbar selection overrides click
+    const chartDroneId = this.currentChartDroneId;
+    const chartDrone = swarm.drones.find(d => d.id === chartDroneId) ?? drone;
+
+    // Charts (skip if paused)
+    if (!this.chartPaused) {
+      this.posChart.pushData(swarm.simTime, chartDrone.position);
+      this.velChart.pushData(swarm.simTime, [...chartDrone.velocity]);
+      this.motorChart.pushData(swarm.simTime, [...chartDrone.motorSpeeds]);
+    }
+  }
+
+  private syncDroneDropdown(ids: number[]): void {
+    // Only rebuild if drone set changed
+    if (ids.length === this.lastKnownDroneIds.length &&
+        ids.every((id, i) => id === this.lastKnownDroneIds[i])) return;
+    this.lastKnownDroneIds = [...ids];
+    const currentVal = this.droneSelect.value;
+    this.droneSelect.textContent = '';
+    for (const id of ids) {
+      const opt = document.createElement('option');
+      opt.value = String(id);
+      opt.textContent = `D${id}`;
+      this.droneSelect.appendChild(opt);
+    }
+    // Keep selection if still valid
+    if (ids.includes(parseInt(currentVal))) {
+      this.droneSelect.value = currentVal;
+    } else {
+      this.droneSelect.value = String(ids[0] ?? 0);
+      this.currentChartDroneId = ids[0] ?? 0;
+    }
+  }
+
+  private clearCharts(): void {
+    this.posChart.clear();
+    this.velChart.clear();
+    this.motorChart.clear();
   }
 
   private startChartLoop(): void {

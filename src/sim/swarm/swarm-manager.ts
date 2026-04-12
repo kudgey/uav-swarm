@@ -103,12 +103,23 @@ export class SwarmManager {
 
   // ── Compound step methods ──
 
-  /** Physics: turbulence once, then per-drone env sample + RK4. */
+  /** Physics: turbulence once, then per-drone env sample + downwash + RK4. */
   stepPhysics(envManager: EnvironmentManager, dt: number, simTime: number): void {
     envManager.stepTemporal(dt);
+    // First pass: sample environment for each drone
     for (const d of this.drones) {
       envManager.sampleAt(d.envOutput, d.state.position, simTime);
-      rk4Step(d.state, this.droneParams, d.envOutput, dt, d.rk4Scratch);
+    }
+    // Second pass: compute downwash (needs all drone positions)
+    envManager.applyDownwash(this.drones);
+    // Third pass: integrate physics
+    for (const d of this.drones) {
+      if (d.destroyed) {
+        // Destroyed drones: motors off, only gravity + drag
+        rk4Step(d.state, this.droneParams, d.envOutput, dt, d.rk4Scratch);
+      } else {
+        rk4Step(d.state, this.droneParams, d.envOutput, dt, d.rk4Scratch);
+      }
     }
   }
 

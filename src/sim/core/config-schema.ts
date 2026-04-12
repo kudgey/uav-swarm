@@ -94,6 +94,7 @@ const environmentConfigSchema = z.object({
   wind: windConfigSchema,
   turbulence: turbulenceConfigSchema,
   groundEffect: z.object({ enabled: z.boolean(), propRadiusFactor: z.number().positive(), wallCeilingEffectEnabled: z.boolean() }).strict(),
+  downwash: z.object({ enabled: z.boolean(), strength: z.number().nonnegative(), verticalRange: z.number().positive() }).strict(),
   magneticField: magneticFieldConfigSchema,
   scene: sceneConfigSchema,
 }).strict();
