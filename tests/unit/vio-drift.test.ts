@@ -58,6 +58,36 @@ describe('VIO drift model', () => {
     expect(driftError).toBeLessThan(30);
   });
 
+  it('feature-poor scene causes faster drift than high-feature scene', () => {
+    const cfg = { ...baseCfg, vioDriftEnabled: true };
+    const dt = 1 / 30;
+
+    // Flight A: high texture quality
+    const stateA = createDroneState(4); stateA.position[2] = -2; stateA.velocity[0] = 1;
+    const envHigh = createDefaultEnv(); envHigh.heightAboveGround = 2; envHigh.surfaceTextureQuality = 0.9;
+    const rngA = new DeterministicRNG(42);
+    const driftA = createVIODriftState(stateA.position);
+    for (let t = 0; t < 10; t += dt) {
+      stateA.position[0] = t;
+      readCameraVIO(stateA, envHigh, cfg, rngA, t, undefined, driftA);
+    }
+    const errorA = Math.abs(driftA.position[0] - 10);
+
+    // Flight B: feature-poor scene
+    const stateB = createDroneState(4); stateB.position[2] = -2; stateB.velocity[0] = 1;
+    const envLow = createDefaultEnv(); envLow.heightAboveGround = 2; envLow.surfaceTextureQuality = 0.1;
+    const rngB = new DeterministicRNG(42);
+    const driftB = createVIODriftState(stateB.position);
+    for (let t = 0; t < 10; t += dt) {
+      stateB.position[0] = t;
+      readCameraVIO(stateB, envLow, cfg, rngB, t, undefined, driftB);
+    }
+    const errorB = Math.abs(driftB.position[0] - 10);
+
+    // Low quality should have meaningfully more drift
+    expect(errorB).toBeGreaterThan(errorA);
+  });
+
   it('drift grows with distance traveled, not just time', () => {
     const cfg = { ...baseCfg, vioDriftEnabled: true };
     const env = createDefaultEnv(); env.heightAboveGround = 2; env.surfaceTextureQuality = 0.8;

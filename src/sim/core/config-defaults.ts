@@ -170,6 +170,9 @@ export function defaultSensorSuiteConfig(): SensorSuiteConfig {
       packetLossProbability: 0.02,
       minRange: 0.2,
       maxRange: 40.0,
+      multipathProbability: 0.15,
+      multipathExtraDelayMean: 1.5,
+      multipathExtraDelayStd: 0.8,
     },
   };
 }

@@ -13,10 +13,10 @@ import type { SensorOutput, UWBMeasurement } from './sensor-types';
 import { registerSubsystem } from '@sim/core/status-labels';
 
 registerSubsystem('sensor-uwb', 'simplified',
-  'Fixed anchor UWB, truth NLOS flag, no MAC contention', {
-    simplifications: ['Infrastructure anchors only (no inter-drone)',
-      'NLOS detected from truth geometry, not estimated',
-      'No MAC/channel congestion model'],
+  'UWB with LOS/NLOS model + multipath echo, no MAC contention', {
+    simplifications: ['NLOS detected from truth geometry, not estimated',
+      'No MAC/channel congestion model',
+      'Multipath modeled as probabilistic extra delay in NLOS'],
   });
 
 /**
@@ -70,6 +70,12 @@ export function readUWB(
       const nlosBiasExtra = Math.abs(rng.gaussian(config.nlosBiasBase, config.nlosBiasStdDev));
       bias = config.losBias + nlosBiasExtra;
       noise = config.nlosNoiseStdDev * rng.gaussian();
+      // Multipath: with some probability, first arrival is a reflected path
+      // Adds extra delay (always positive, folded normal)
+      if (rng.next() < config.multipathProbability) {
+        const extraDelay = Math.abs(rng.gaussian(config.multipathExtraDelayMean, config.multipathExtraDelayStd));
+        bias += extraDelay;
+      }
     }
 
     const rangeMeas = Math.max(0, trueRange + bias + noise);

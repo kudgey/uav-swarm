@@ -114,19 +114,23 @@ export function readCameraVIO(
       const rdpY = sy * sdpX + cy * sdpY;
       const rdpZ = sdpZ; // z unaffected by yaw
 
-      // Position random walk (amplified when feature quality is low)
+      // All drift components scale inversely with feature quality.
+      // Quality=1 → baseline rate, quality=0.1 → ~3x, quality=0.05 → ~4.5x.
+      // This captures real VIO behavior: feature-poor scenes drift faster.
+      const qClamped = Math.max(0.05, featureQuality);
+      const qualityScale = 1.0 / Math.sqrt(qClamped);
+
       const sqrtDt = Math.sqrt(dt);
-      const rwScale = featureQuality < 0.3 ? 5.0 : 1.0;
-      const sigmaRW = config.vioPositionRW * rwScale;
+      const sigmaRW = config.vioPositionRW * qualityScale;
 
       // Integrate
       vioDrift.position[0] += rdpX + sigmaRW * sqrtDt * rng.gaussian();
       vioDrift.position[1] += rdpY + sigmaRW * sqrtDt * rng.gaussian();
       vioDrift.position[2] += rdpZ + sigmaRW * sqrtDt * rng.gaussian();
 
-      // Evolve biases
-      vioDrift.biasScale += config.vioScaleBiasRW * sqrtDt * rng.gaussian();
-      vioDrift.yawDrift += config.vioYawDriftRW * sqrtDt * rng.gaussian();
+      // Evolve biases (scale with quality too — poor features → faster scale/yaw drift)
+      vioDrift.biasScale += config.vioScaleBiasRW * qualityScale * sqrtDt * rng.gaussian();
+      vioDrift.yawDrift += config.vioYawDriftRW * qualityScale * sqrtDt * rng.gaussian();
 
       vioDrift.lastTime = simTime;
     }

@@ -20,11 +20,9 @@ import { ScenarioPanel } from './panels/scenario-panel';
 import { TelemetryChart } from './charts/telemetry-chart';
 import type { WorkerCommand, WorkerEvent, SwarmSnapshot } from '@worker/worker-protocol';
 
-// Import stubs to trigger their registration
-import '@sim/environment/environment';
+// Import barrel modules to trigger subsystem registration
 import '@sim/sensors/sensors';
 import '@sim/estimation/estimation';
-import '@sim/swarm/swarm';
 import '@sim/safety/safety';
 import '@sim/scenarios/scenarios';
 
@@ -53,6 +51,10 @@ export class App {
   private chartTimeWindow = 30; // seconds
   private currentChartDroneId = 0;
   private lastKnownDroneIds: number[] = [];
+  // RTF tracking
+  private lastRtfSimTime = 0;
+  private lastRtfWallTime = 0;
+  private rtfEma = 1.0;
 
   constructor(private root: HTMLElement) {
     injectTheme();
@@ -131,29 +133,74 @@ export class App {
         align-items: stretch;
         min-height: 0;
       }
-      .advanced-toggle {
-        padding: 8px 12px; font-size: 11px; color: var(--text-muted);
-        cursor: pointer; border-top: 1px solid var(--border);
-        text-transform: uppercase; letter-spacing: 0.5px;
-        user-select: none;
+      .sidebar-tabs {
+        display: flex;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-secondary);
+        overflow-x: auto;
+        flex-shrink: 0;
       }
-      .advanced-toggle:hover { color: var(--text-primary); }
-      .advanced-body { display: none; padding: 6px; }
-      .advanced-body.open { display: flex; flex-direction: column; gap: 6px; }
+      .sidebar-tab {
+        padding: 6px 10px;
+        font-family: var(--font-ui);
+        font-size: var(--font-size-xs);
+        color: var(--text-muted);
+        cursor: pointer;
+        user-select: none;
+        border: none;
+        background: transparent;
+        white-space: nowrap;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border-bottom: 2px solid transparent;
+      }
+      .sidebar-tab:hover { color: var(--text-primary); }
+      .sidebar-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+      .tab-body { display: none; padding: 6px; gap: 6px; flex-direction: column; }
+      .tab-body.active { display: flex; }
+      .sidebar-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.4);
+        z-index: 99;
+      }
+      .sidebar-backdrop.open { display: block; }
+      .sb-hamburger { display: none; }
       @media (max-width: 700px) {
         .app-layout {
           grid-template-columns: 1fr;
-          grid-template-rows: 32px auto 1fr 28px auto;
+          grid-template-rows: 32px 1fr 28px 160px;
         }
         .app-sidebar {
-          grid-row: 2;
-          max-height: 40vh;
-          border-right: none;
-          border-bottom: 1px solid var(--border);
+          grid-row: auto;
+          position: fixed;
+          top: 32px;
+          left: 0;
+          bottom: 0;
+          width: 85vw;
+          max-width: 320px;
+          z-index: 100;
+          transform: translateX(-100%);
+          transition: transform 0.25s ease-out;
+          box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+          border-right: 1px solid var(--border);
         }
-        .app-viewport { grid-row: 3; }
-        .app-chart-toolbar { grid-row: 4; }
-        .app-charts { grid-row: 5; min-height: 100px; flex-wrap: wrap; max-height: none; }
+        .app-sidebar.open { transform: translateX(0); }
+        .app-viewport { grid-row: 2; }
+        .app-chart-toolbar { grid-row: 3; }
+        .app-charts { grid-row: 4; min-height: 100px; flex-wrap: wrap; max-height: none; }
+        .sb-hamburger {
+          display: inline-block;
+          background: transparent;
+          border: none;
+          color: var(--text-primary);
+          font-size: 18px;
+          cursor: pointer;
+          padding: 0 8px;
+        }
+        .sb-hamburger:hover { color: var(--accent); }
       }
     `;
     document.head.appendChild(style);
@@ -165,10 +212,20 @@ export class App {
     // Status bar
     this.statusBar = document.createElement('div');
     this.statusBar.className = 'app-status-bar';
+
+    // Hamburger (mobile only)
+    const hamburger = document.createElement('button');
+    hamburger.className = 'sb-hamburger';
+    hamburger.textContent = '☰';
+    hamburger.setAttribute('aria-label', 'Toggle menu');
+    this.statusBar.appendChild(hamburger);
+
     const sbItems = [
       ['Drones', 'sb-drones', '0'],
       ['Selected', 'sb-selected', 'D0'],
       ['t', 'sb-time', '0.0s'],
+      ['RTF', 'sb-rtf', '--'],
+      ['Health', 'sb-health', '—'],
       ['Min sep', 'sb-minsep', '--'],
       ['Collisions', 'sb-collisions', '0'],
     ];
@@ -205,6 +262,20 @@ export class App {
     sidebar.className = 'app-sidebar';
     layout.appendChild(sidebar);
 
+    // Mobile drawer backdrop
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sidebar-backdrop';
+    document.body.appendChild(backdrop);
+    const closeDrawer = () => {
+      sidebar.classList.remove('open');
+      backdrop.classList.remove('open');
+    };
+    hamburger.addEventListener('click', () => {
+      const isOpen = sidebar.classList.toggle('open');
+      backdrop.classList.toggle('open', isOpen);
+    });
+    backdrop.addEventListener('click', closeDrawer);
+
     // Mission panel — primary UI
     this.missionPanel = new MissionPanel(
       sidebar,
@@ -217,35 +288,64 @@ export class App {
       },
     );
 
-    // Advanced section — collapsible
-    const advToggle = document.createElement('div');
-    advToggle.className = 'advanced-toggle';
-    advToggle.textContent = 'Advanced >';
-    sidebar.appendChild(advToggle);
+    // Tabs for advanced panels
+    const tabsNav = document.createElement('div');
+    tabsNav.className = 'sidebar-tabs';
+    sidebar.appendChild(tabsNav);
 
-    const advBody = document.createElement('div');
-    advBody.className = 'advanced-body';
-    sidebar.appendChild(advBody);
+    const tabBodies: Record<string, HTMLDivElement> = {};
+    const tabDefs = [
+      { id: 'swarm', label: 'Swarm' },
+      { id: 'sensors', label: 'Sensors' },
+      { id: 'env', label: 'Env' },
+      { id: 'safety', label: 'Safety' },
+      { id: 'diag', label: 'Diag' },
+    ];
+    for (const def of tabDefs) {
+      const body = document.createElement('div');
+      body.className = 'tab-body';
+      body.dataset.tab = def.id;
+      tabBodies[def.id] = body;
+      sidebar.appendChild(body);
+    }
 
-    advToggle.addEventListener('click', () => {
-      const open = advBody.classList.toggle('open');
-      advToggle.textContent = open ? 'Advanced v' : 'Advanced >';
-    });
+    for (const def of tabDefs) {
+      const btn = document.createElement('button');
+      btn.className = 'sidebar-tab';
+      btn.textContent = def.label;
+      btn.addEventListener('click', () => {
+        tabsNav.querySelectorAll('.sidebar-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        for (const id of Object.keys(tabBodies)) {
+          tabBodies[id].classList.toggle('active', id === def.id);
+        }
+      });
+      tabsNav.appendChild(btn);
+    }
 
-    this.statePanel = new StatePanel(advBody);
-    this.controllerPanel = new ControllerPanel(advBody, cmd => this.sendCommand(cmd));
-    this.formationPanel = new FormationPanel(advBody, cmd => this.sendCommand(cmd));
-    this.safetyPanel = new SafetyPanel(advBody, cmd => this.sendCommand(cmd));
-    this.scenarioPanel = new ScenarioPanel(advBody, cmd => this.sendCommand(cmd));
-    this.sensorPanel = new SensorPanel(advBody, cmd => this.sendCommand(cmd));
-    this.envPanel = new EnvironmentPanel(advBody, cmd => this.sendCommand(cmd));
-    this.motorPanel = new MotorPanel(advBody, cmd => this.sendCommand(cmd));
-    this.paramsPanel = new ParamsPanel(advBody, cmd => this.sendCommand(cmd));
-    this.statusPanel = new StatusPanel(advBody);
+    // Populate tabs
+    this.controllerPanel = new ControllerPanel(tabBodies.swarm, cmd => this.sendCommand(cmd));
+    this.formationPanel = new FormationPanel(tabBodies.swarm, cmd => this.sendCommand(cmd));
+    this.statePanel = new StatePanel(tabBodies.swarm);
 
-    // Make advanced panels collapsible
-    const panels = advBody.querySelectorAll<HTMLDivElement>('.panel');
-    panels.forEach(p => makeCollapsible(p, false));
+    this.sensorPanel = new SensorPanel(tabBodies.sensors, cmd => this.sendCommand(cmd));
+    this.motorPanel = new MotorPanel(tabBodies.sensors, cmd => this.sendCommand(cmd));
+    this.paramsPanel = new ParamsPanel(tabBodies.sensors, cmd => this.sendCommand(cmd));
+
+    this.envPanel = new EnvironmentPanel(tabBodies.env, cmd => this.sendCommand(cmd));
+
+    this.safetyPanel = new SafetyPanel(tabBodies.safety, cmd => this.sendCommand(cmd));
+
+    this.scenarioPanel = new ScenarioPanel(tabBodies.diag, cmd => this.sendCommand(cmd));
+    this.statusPanel = new StatusPanel(tabBodies.diag);
+
+    // Collapsible within each tab
+    for (const id of Object.keys(tabBodies)) {
+      const panels = tabBodies[id].querySelectorAll<HTMLDivElement>('.panel');
+      panels.forEach(p => makeCollapsible(p, true));
+    }
+    // Activate first tab
+    (tabsNav.firstChild as HTMLButtonElement).click();
 
     // Viewport
     const viewportContainer = document.createElement('div');
@@ -400,15 +500,48 @@ export class App {
     this.formationPanel.update(swarm);
     this.safetyPanel.update(swarm);
 
+    // RTF: exponential moving average of sim/wall time ratio
+    const nowWall = performance.now() / 1000;
+    if (this.lastRtfWallTime > 0) {
+      const dWall = nowWall - this.lastRtfWallTime;
+      const dSim = swarm.simTime - this.lastRtfSimTime;
+      if (dWall > 0.05) {
+        const instRtf = dSim / dWall;
+        this.rtfEma = 0.8 * this.rtfEma + 0.2 * instRtf;
+        this.lastRtfSimTime = swarm.simTime;
+        this.lastRtfWallTime = nowWall;
+      }
+    } else {
+      this.lastRtfSimTime = swarm.simTime;
+      this.lastRtfWallTime = nowWall;
+    }
+
+    // Health string for selected drone
+    const h = drone.estimate?.health;
+    let healthStr = '—';
+    let healthColor = 'var(--text-muted)';
+    if (h) {
+      const bad: string[] = [];
+      if (!h.aligned) bad.push('unaligned');
+      if (!h.attitudeHealthy) bad.push('att');
+      if (!h.verticalHealthy) bad.push('vert');
+      if (bad.length === 0) { healthStr = 'OK'; healthColor = 'var(--success)'; }
+      else { healthStr = bad.join(','); healthColor = 'var(--error)'; }
+    }
+
     // Status bar
     const sbDrones = document.getElementById('sb-drones');
     const sbSelected = document.getElementById('sb-selected');
     const sbTime = document.getElementById('sb-time');
+    const sbRtf = document.getElementById('sb-rtf');
+    const sbHealth = document.getElementById('sb-health');
     const sbMinSep = document.getElementById('sb-minsep');
     const sbCollisions = document.getElementById('sb-collisions');
     if (sbDrones) sbDrones.textContent = String(swarm.drones.length);
     if (sbSelected) sbSelected.textContent = `D${drone.id}`;
     if (sbTime) sbTime.textContent = `${swarm.simTime.toFixed(1)}s`;
+    if (sbRtf) sbRtf.textContent = `${this.rtfEma.toFixed(1)}x`;
+    if (sbHealth) { sbHealth.textContent = healthStr; sbHealth.style.color = healthColor; }
     if (sbMinSep) sbMinSep.textContent = swarm.safetyMetrics.minSeparation === Infinity ? '--' : `${swarm.safetyMetrics.minSeparation.toFixed(2)}m`;
     if (sbCollisions) sbCollisions.textContent = String(swarm.safetyMetrics.collisionCount);
 

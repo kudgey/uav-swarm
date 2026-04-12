@@ -241,6 +241,11 @@ export interface UWBSensorConfig {
   packetLossProbability: number;
   minRange: number;              // m
   maxRange: number;              // m
+  // Multipath: probability that NLOS measurement is a strong multipath echo
+  // (picks up a longer reflected path instead of direct). On hit, adds extra delay.
+  multipathProbability: number;  // 0..1, default 0.15
+  multipathExtraDelayMean: number; // m, default 1.5 (extra path length from reflection)
+  multipathExtraDelayStd: number;  // m, default 0.8
 }
 
 export interface ImuSensorConfig {

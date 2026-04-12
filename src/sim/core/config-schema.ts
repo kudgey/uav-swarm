@@ -185,6 +185,9 @@ const uwbSensorConfigSchema = z.object({
   packetLossProbability: z.number().min(0).max(1),
   minRange: z.number().nonnegative(),
   maxRange: z.number().positive(),
+  multipathProbability: z.number().min(0).max(1),
+  multipathExtraDelayMean: z.number().nonnegative(),
+  multipathExtraDelayStd: z.number().nonnegative(),
 }).strict();
 
 const sensorSuiteConfigSchema = z.object({
