@@ -58,6 +58,38 @@ describe('UWB multipath', () => {
     expect(noMultipathMean).toBeGreaterThan(0); // still has positive NLOS bias
   });
 
+  it('NLOS with P=0.5 multipath: distribution is bimodal (two peaks)', () => {
+    const cfg = defaultSimConfig();
+    cfg.sensors.uwb!.enabled = true;
+    cfg.sensors.uwb!.multipathProbability = 0.5;
+    cfg.sensors.uwb!.multipathExtraDelayMean = 3.0; // big echo separation
+    cfg.sensors.uwb!.multipathExtraDelayStd = 0.2;
+    cfg.sensors.uwb!.nlosBiasBase = 0.3;
+    cfg.sensors.uwb!.nlosBiasStdDev = 0.1;
+    cfg.sensors.uwb!.nlosNoiseStdDev = 0.05;
+    cfg.sensors.uwb!.packetLossProbability = 0;
+    cfg.environment.scene.obstacles = [{ min: [2, -1, -3], max: [3, 1, 0] }];
+    cfg.environment.scene.uwbAnchors = [{ id: 'A0', position: [5, 0, -1] }];
+
+    const worldGeo = new WorldGeometry(cfg.environment.scene);
+    const state = createDroneState(4);
+    state.position[0] = 0; state.position[1] = 0; state.position[2] = -1;
+
+    const rng = new DeterministicRNG(42);
+    const errors: number[] = [];
+    const N = 500;
+    for (let i = 0; i < N; i++) {
+      const results = readUWB(state, cfg.environment.scene.uwbAnchors!, cfg.sensors.uwb!, worldGeo, rng, i);
+      errors.push(results[0].measurement.range - 5);
+    }
+    // Two modes: low (~0.3) and high (~3.3)
+    const lowMode = errors.filter(e => e < 1.5).length;
+    const highMode = errors.filter(e => e > 2.5).length;
+    // Expect both groups substantial (at least 30% each for P=0.5)
+    expect(lowMode / N).toBeGreaterThan(0.3);
+    expect(highMode / N).toBeGreaterThan(0.3);
+  });
+
   it('LOS measurements unaffected by multipath config', () => {
     const cfg = defaultSimConfig();
     cfg.sensors.uwb!.enabled = true;

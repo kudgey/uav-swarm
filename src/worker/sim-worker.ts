@@ -60,7 +60,7 @@ let lastMissionSampleStep = 0;
 let missionLaunchCentroid = [0, 0, 0];
 
 // ── Flight log recorder ──
-const LOG_RATE_HZ = 10;
+const LOG_RATE_HZ = 30;
 let logLines: string[] = [];
 let lastLogStep = 0;
 

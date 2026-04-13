@@ -11,6 +11,7 @@ import { createDefaultEnv, defaultEKFConfig, defaultControllerConfig } from '@si
 import { SensorManager } from '@sim/sensors/sensor-manager';
 import { ErrorStateEKF } from '@sim/estimation/ekf-state';
 import { CascadedController } from '@sim/control/controller';
+import { createBatteryState } from '@sim/actuators/battery';
 import type { DroneState, DroneParams, EnvironmentOutput, SensorSuiteConfig } from '@sim/core/types';
 import type { DeterministicRNG } from '@sim/core/rng';
 import type { WorldGeometry } from '@sim/environment/world-geometry';
@@ -40,6 +41,10 @@ export interface DroneInstance {
   safeGuidance: import('@sim/control/controller-types').GuidanceOutput | undefined;
   /** Cached safety state from last stepSafetyGuidance(). */
   lastSafetyState: import('@sim/safety/safety-types').SafetyState | null;
+  /** Battery state (when enabled in config). */
+  battery: import('@sim/actuators/battery').BatteryState;
+  /** Last computed thrust multiplier from battery (1.0 if disabled). */
+  batteryThrustMult: number;
 }
 
 export interface NeighborEstimate {
@@ -109,5 +114,7 @@ export function createDroneInstance(
     lastFormationState: null,
     safeGuidance: undefined,
     lastSafetyState: null,
+    battery: createBatteryState(1.0),
+    batteryThrustMult: 1.0,
   };
 }

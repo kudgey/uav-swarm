@@ -66,15 +66,20 @@ export function readUWB(
       bias = config.losBias;
       noise = config.losNoiseStdDev * rng.gaussian();
     } else {
-      // Folded normal: |N(mean, std²)| → always positive bias
-      const nlosBiasExtra = Math.abs(rng.gaussian(config.nlosBiasBase, config.nlosBiasStdDev));
-      bias = config.losBias + nlosBiasExtra;
-      noise = config.nlosNoiseStdDev * rng.gaussian();
-      // Multipath: with some probability, first arrival is a reflected path
-      // Adds extra delay (always positive, folded normal)
+      // Bimodal NLOS: either "soft NLOS" (attenuated direct, small bias) OR
+      // "multipath" (direct blocked, first arrival is reflected echo).
+      // This matches empirical UWB behavior better than a single folded-normal tail.
       if (rng.next() < config.multipathProbability) {
-        const extraDelay = Math.abs(rng.gaussian(config.multipathExtraDelayMean, config.multipathExtraDelayStd));
-        bias += extraDelay;
+        // Multipath branch: reflected first arrival. Large, narrow-distribution bias.
+        // Echo path length is bounded below by geometry (can't be less than direct).
+        const echoExtra = Math.abs(rng.gaussian(config.multipathExtraDelayMean, config.multipathExtraDelayStd));
+        bias = config.losBias + echoExtra;
+        noise = config.nlosNoiseStdDev * rng.gaussian();
+      } else {
+        // Soft NLOS: attenuated direct-path still dominates. Small positive bias.
+        const nlosBiasExtra = Math.abs(rng.gaussian(config.nlosBiasBase, config.nlosBiasStdDev));
+        bias = config.losBias + nlosBiasExtra;
+        noise = config.nlosNoiseStdDev * rng.gaussian();
       }
     }
 

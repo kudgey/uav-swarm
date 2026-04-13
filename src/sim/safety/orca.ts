@@ -84,6 +84,7 @@ export function computeORCA(
 
       if (dotWRP < 0 && wLenSq > truncRadius * truncRadius) {
         // rv is on the truncation cap side AND outside cap → project to truncation cap circle
+        if (wLen < 1e-9) { continue; } // degenerate — skip
         const invWLen = 1 / wLen;
         const ulen = truncRadius - wLen;
         ux = -ulen * wx * invWLen;

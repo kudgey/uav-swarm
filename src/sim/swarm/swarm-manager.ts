@@ -9,6 +9,7 @@
 
 import { v3Create, v3Len } from '@lib/math';
 import { rk4Step } from '@sim/physics/integrator';
+import { stepBattery } from '@sim/actuators/battery';
 import { createDroneInstance, type DroneInstance, type NeighborEstimate } from './drone-instance';
 import { CommunicationSystem } from '@sim/communications/comm-system';
 import type { CommConfig, DroneStateEstimatePayload } from '@sim/communications/comm-types';
@@ -103,7 +104,7 @@ export class SwarmManager {
 
   // ── Compound step methods ──
 
-  /** Physics: turbulence once, then per-drone env sample + downwash + RK4. */
+  /** Physics: turbulence once, then per-drone env sample + downwash + battery + RK4. */
   stepPhysics(envManager: EnvironmentManager, dt: number, simTime: number): void {
     envManager.stepTemporal(dt);
     // First pass: sample environment for each drone
@@ -112,14 +113,22 @@ export class SwarmManager {
     }
     // Second pass: compute downwash (needs all drone positions)
     envManager.applyDownwash(this.drones);
-    // Third pass: integrate physics
+    // Third pass: step battery + compose into downwashMultiplier
+    const batteryCfg = this.droneParams.battery;
     for (const d of this.drones) {
-      if (d.destroyed) {
-        // Destroyed drones: motors off, only gravity + drag
-        rk4Step(d.state, this.droneParams, d.envOutput, dt, d.rk4Scratch);
-      } else {
-        rk4Step(d.state, this.droneParams, d.envOutput, dt, d.rk4Scratch);
+      if (!batteryCfg.enabled || d.destroyed) { d.batteryThrustMult = 1.0; continue; }
+      // Total thrust at current motor speeds (before multiplier)
+      let T = 0;
+      for (let i = 0; i < d.state.motorSpeeds.length; i++) {
+        T += this.droneParams.kT * d.state.motorSpeeds[i] * d.state.motorSpeeds[i];
       }
+      d.batteryThrustMult = stepBattery(d.battery, batteryCfg, T, dt);
+      // Compose into downwash multiplier (rigid-body multiplies by downwash)
+      d.envOutput.downwashMultiplier *= d.batteryThrustMult;
+    }
+    // Fourth pass: integrate physics
+    for (const d of this.drones) {
+      rk4Step(d.state, this.droneParams, d.envOutput, dt, d.rk4Scratch);
     }
   }
 

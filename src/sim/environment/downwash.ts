@@ -90,3 +90,52 @@ export function computeDownwashMultiplier(
   const multiplier = Math.max(0.5, 1 - totalReduction);
   return Math.min(1.0, multiplier);
 }
+
+/**
+ * Compute downwash-induced wind velocity perturbation for target drone.
+ * Downward (positive z in NED) flow from drones above, scaled by proximity.
+ * Written to `out` Vec3, added to env wind downstream.
+ */
+export function computeDownwashWindPerturbation(
+  out: Float64Array,
+  target: DroneLikeForDownwash,
+  allDrones: DroneLikeForDownwash[],
+  propRadius: number,
+  config: DownwashConfig,
+): void {
+  out[0] = 0; out[1] = 0; out[2] = 0;
+  if (!config.enabled || propRadius <= 0) return;
+
+  const R = propRadius;
+  const tx = target.position[0], ty = target.position[1], tz = target.position[2];
+
+  // Approx induced downwash velocity = thrust-to-weight * v_ind (Glauert).
+  // At hover v_ind ≈ 5 m/s for typical quad. Scale by proximity.
+  // Strong near-field component: wake can reach ~2*v_ind then decay.
+  const MAX_WAKE_SPEED = 4.0; // m/s, peak inside wake column
+
+  for (const other of allDrones) {
+    if (other.id === target.id || other.destroyed) continue;
+    const dz = tz - other.position[2];
+    if (dz <= 0 || dz > config.verticalRange) continue;
+    const dx = tx - other.position[0];
+    const dy = ty - other.position[1];
+    const dr = Math.sqrt(dx * dx + dy * dy);
+
+    // Horizontal: Gaussian with sigma ~= R (inside wake column)
+    const horizFactor = Math.exp(-(dr * dr) / (R * R));
+    // Vertical: 1/(1 + (dz/R)²) — close drones see strong wake, distant weak
+    const vertFactor = 1 / (1 + (dz / R) * (dz / R));
+    // Downward wind (positive z in NED) — outflow from rotors above
+    const wakeSpeed = MAX_WAKE_SPEED * config.strength * horizFactor * vertFactor;
+    out[2] += wakeSpeed;
+
+    // Lateral shear: near edge of wake column, outflow flares slightly outward.
+    // Simplified: small lateral component in direction of horizontal offset.
+    if (dr > 0.01 && dr < R * 2) {
+      const edgeFactor = (dr / R) * Math.exp(-(dr / R) * (dr / R)) * config.strength * 0.5;
+      out[0] += (dx / dr) * edgeFactor * MAX_WAKE_SPEED * vertFactor;
+      out[1] += (dy / dr) * edgeFactor * MAX_WAKE_SPEED * vertFactor;
+    }
+  }
+}

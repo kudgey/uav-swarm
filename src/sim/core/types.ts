@@ -35,6 +35,7 @@ export interface DroneParams {
   dragMode: 'linear' | 'quadratic' | 'combined';
   dragCoeffRotor: Vec3;          // rotor drag [Dr_x, Dr_y, Dr_z] N/(m/s) (Faessler et al.). [0,0,0] = off.
   rotorInertia: number;          // kg*m^2, single rotor. 0 = no gyroscopic torque.
+  battery: import('@sim/actuators/battery').BatteryConfig;
 }
 
 // ── Drone state ──

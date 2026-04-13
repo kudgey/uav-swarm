@@ -33,7 +33,17 @@ export interface VIODriftState {
   yawDrift: number;    // accumulated heading error (rad)
   lastTime: number;    // last update simTime
   initialized: boolean;
+  // Tracking state machine (catastrophic loss model)
+  trackingLost: boolean;  // true when VIO has lost tracking
+  lostSince: number;      // simTime when tracking was lost
 }
+
+// Below this feature quality, VIO abruptly loses tracking
+const CATASTROPHIC_LOSS_THRESHOLD = 0.03;
+// Tracking remains lost for at least this long (recovery hysteresis)
+const TRACKING_RECOVERY_HOLD_SEC = 1.5;
+// Feature quality must recover above this to re-acquire tracking
+const RECOVERY_QUALITY_THRESHOLD = 0.3;
 
 export function createVIODriftState(initialPos: Vec3): VIODriftState {
   return {
@@ -41,6 +51,8 @@ export function createVIODriftState(initialPos: Vec3): VIODriftState {
     biasScale: 0,
     yawDrift: 0,
     lastTime: 0,
+    trackingLost: false,
+    lostSince: 0,
     initialized: false,
   };
 }
@@ -75,6 +87,25 @@ export function readCameraVIO(
     const motionFactor = clamp(1 - angRate / config.maxAngularRateForQuality, 0, 1);
     const heightFactor = clamp(1 - h / config.maxHeightForQuality, 0.1, 1);
     featureQuality = env.surfaceTextureQuality * motionFactor * heightFactor;
+  }
+
+  // Catastrophic loss state machine (only when drift model active)
+  if (vioDrift) {
+    if (!vioDrift.trackingLost && featureQuality < CATASTROPHIC_LOSS_THRESHOLD) {
+      vioDrift.trackingLost = true;
+      vioDrift.lostSince = simTime;
+    }
+    if (vioDrift.trackingLost) {
+      const held = simTime - vioDrift.lostSince;
+      // Recover only if quality high enough AND held long enough
+      if (held >= TRACKING_RECOVERY_HOLD_SEC && featureQuality >= RECOVERY_QUALITY_THRESHOLD) {
+        vioDrift.trackingLost = false;
+        // Reset initialized so we re-anchor on next valid sample
+        vioDrift.initialized = false;
+      } else {
+        return invalid; // still lost
+      }
+    }
   }
 
   if (featureQuality < config.featureThreshold) return invalid;

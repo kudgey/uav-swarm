@@ -28,6 +28,15 @@ export const droneParamsSchema = z.object({
   dragMode: z.enum(['linear', 'quadratic', 'combined']),
   dragCoeffRotor: vec3Schema,
   rotorInertia: z.number().nonnegative(),
+  battery: z.object({
+    enabled: z.boolean(),
+    capacityWh: z.number().positive(),
+    nominalVoltage: z.number().positive(),
+    fullVoltageFraction: z.number().positive(),
+    cutoffFraction: z.number().positive(),
+    internalResistance: z.number().nonnegative(),
+    currentPerThrustNewton: z.number().nonnegative(),
+  }).strict(),
 }).strict();
 
 // ── Environment config ──

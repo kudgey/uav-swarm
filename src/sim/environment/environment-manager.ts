@@ -13,7 +13,7 @@ import { isaPressure, isaTemperature, isaDensity } from './atmosphere';
 import { WindField } from './wind';
 import { TurbulenceGenerator } from './turbulence';
 import { computeGroundEffectMultiplier } from './ground-effect';
-import { computeDownwashMultiplier } from './downwash';
+import { computeDownwashMultiplier, computeDownwashWindPerturbation } from './downwash';
 import { MagneticFieldModel } from './magnetic-field';
 import { WorldGeometry } from './world-geometry';
 import type { Vec3, EnvironmentOutput, EnvironmentConfig } from '@sim/core/types';
@@ -126,13 +126,15 @@ export class EnvironmentManager {
       return;
     }
     const asLike = drones.map(d => ({ id: d.id, position: d.state.position, destroyed: d.destroyed }));
+    const perturb = new Float64Array(3);
     for (const d of drones) {
-      d.envOutput.downwashMultiplier = computeDownwashMultiplier(
-        { id: d.id, position: d.state.position, destroyed: d.destroyed },
-        asLike,
-        this.propRadius,
-        this.config.downwash,
-      );
+      const self = { id: d.id, position: d.state.position, destroyed: d.destroyed };
+      d.envOutput.downwashMultiplier = computeDownwashMultiplier(self, asLike, this.propRadius, this.config.downwash);
+      // Velocity perturbation: injected into wind field additively
+      computeDownwashWindPerturbation(perturb, self, asLike, this.propRadius, this.config.downwash);
+      d.envOutput.wind[0] += perturb[0];
+      d.envOutput.wind[1] += perturb[1];
+      d.envOutput.wind[2] += perturb[2];
     }
   }
 

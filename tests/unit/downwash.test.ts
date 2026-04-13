@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeDownwashMultiplier, defaultDownwashConfig } from '@sim/environment/downwash';
+import { computeDownwashMultiplier, computeDownwashWindPerturbation, defaultDownwashConfig } from '@sim/environment/downwash';
 
 function drone(id: number, x: number, y: number, z: number) {
   return { id, position: new Float64Array([x, y, z]) };
@@ -59,6 +59,24 @@ describe('Downwash model', () => {
     const multAlive = computeDownwashMultiplier(target, [target, alive], 0.15, cfg);
     expect(multDead).toBe(1.0);
     expect(multAlive).toBeLessThan(1.0);
+  });
+
+  it('wind perturbation: downward wake from drone above', () => {
+    const cfg = { ...defaultDownwashConfig(), enabled: true, strength: 0.3 };
+    const target = drone(0, 0, 0, -2);
+    const above = [drone(1, 0, 0, -2.3)];
+    const out = new Float64Array(3);
+    computeDownwashWindPerturbation(out, target, [target, ...above], 0.15, cfg);
+    expect(out[2]).toBeGreaterThan(0); // positive z = downward in NED
+  });
+
+  it('wind perturbation: zero when no drones above', () => {
+    const cfg = { ...defaultDownwashConfig(), enabled: true, strength: 0.3 };
+    const target = drone(0, 0, 0, -2);
+    const below = [drone(1, 0, 0, -1)]; // below target (z=-1 lower in NED)
+    const out = new Float64Array(3);
+    computeDownwashWindPerturbation(out, target, [target, ...below], 0.15, cfg);
+    expect(out[0]).toBe(0); expect(out[1]).toBe(0); expect(out[2]).toBe(0);
   });
 
   it('caps reduction at 0.5 (avoids negative thrust)', () => {

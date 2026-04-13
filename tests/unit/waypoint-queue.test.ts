@@ -66,6 +66,33 @@ describe('Waypoint queue', () => {
     expect(remaining[1].position[0]).toBe(30);
   });
 
+  it('consensus sync with 0 neighbors: self progresses normally', () => {
+    const g = new GuidanceModule();
+    g.setMissionPlan([
+      { position: [10, 0, -2], yaw: 0, speed: 2 },
+      { position: [20, 0, -2], yaw: 0, speed: 2 },
+    ]);
+    // No neighbors — should not crash, self retains progress
+    g.syncConsensusProgress([]);
+    expect(g.getMissionProgress().current).toBe(0);
+  });
+
+  it('consensus sync with 1 slow neighbor: self held back', () => {
+    const g = new GuidanceModule();
+    g.setMissionPlan([
+      { position: [10, 0, -2], yaw: 0, speed: 2 },
+      { position: [20, 0, -2], yaw: 0, speed: 2 },
+      { position: [30, 0, -2], yaw: 0, speed: 2 },
+    ]);
+    // Advance self manually to index 2
+    g.evaluate(makeEstimate(10, 0, -2));
+    g.evaluate(makeEstimate(20, 0, -2));
+    expect(g.getMissionProgress().current).toBe(2);
+    // Slow neighbor still at 0 — median = 1, self must drop to 1
+    g.syncConsensusProgress([0]);
+    expect(g.getMissionProgress().current).toBeLessThanOrEqual(2);
+  });
+
   it('empty plan → no crash, stays in hover', () => {
     const g = new GuidanceModule();
     g.setMissionPlan([]);

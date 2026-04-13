@@ -120,7 +120,7 @@ function runPatrol(distance: number, seed: number): DriftRun {
 
 describe('Drift budget experiment', () => {
   it('measures return drift vs distance (GPS-denied patrol)', () => {
-    const distances = [20, 50, 100];
+    const distances = [20, 50, 100, 200];
     const seeds = [42, 43, 44];
     const runs: DriftRun[] = [];
 
@@ -159,5 +159,5 @@ describe('Drift budget experiment', () => {
     const meanAt20 = runs.filter(r => r.distance === 20).reduce((s, r) => s + r.returnDrift, 0) / seeds.length;
     const meanAt100 = runs.filter(r => r.distance === 100).reduce((s, r) => s + r.returnDrift, 0) / seeds.length;
     expect(meanAt100).toBeGreaterThan(meanAt20 * 0.5); // 100m drift at least half of 20m (very loose)
-  }, 120000); // 2 min timeout for full sweep
+  }, 300000); // 5 min timeout for extended sweep
 });

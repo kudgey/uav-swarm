@@ -58,6 +58,29 @@ describe('VIO drift model', () => {
     expect(driftError).toBeLessThan(30);
   });
 
+  it('catastrophic loss: VIO invalid below loss threshold, recovers after hold', () => {
+    const cfg = { ...baseCfg, vioDriftEnabled: true };
+    const state = createDroneState(4); state.position[2] = -2;
+    const envLow = createDefaultEnv(); envLow.heightAboveGround = 2; envLow.surfaceTextureQuality = 0.01;
+    const envHigh = createDefaultEnv(); envHigh.heightAboveGround = 2; envHigh.surfaceTextureQuality = 0.8;
+    const rng = new DeterministicRNG(42);
+    const drift = createVIODriftState(state.position);
+
+    // First reading in low quality — triggers loss
+    const r1 = readCameraVIO(state, envLow, cfg, rng, 0, undefined, drift);
+    expect(r1.valid).toBe(false);
+    expect(drift.trackingLost).toBe(true);
+
+    // Good env immediately after — still lost (hold period)
+    const r2 = readCameraVIO(state, envHigh, cfg, rng, 0.5, undefined, drift);
+    expect(r2.valid).toBe(false);
+
+    // After 1.5s hold + good quality — recovers
+    const r3 = readCameraVIO(state, envHigh, cfg, rng, 1.6, undefined, drift);
+    expect(r3.valid).toBe(true);
+    expect(drift.trackingLost).toBe(false);
+  });
+
   it('feature-poor scene causes faster drift than high-feature scene', () => {
     const cfg = { ...baseCfg, vioDriftEnabled: true };
     const dt = 1 / 30;

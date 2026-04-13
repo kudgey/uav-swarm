@@ -6,6 +6,7 @@
  */
 
 import { v3Create, m3Identity, m3Create } from '@lib/math';
+import { defaultBatteryConfig } from '@sim/actuators/battery';
 import { xQuadRotorPositions, X_QUAD_ROTOR_DIRS, GRAVITY_MPS2 } from './frames';
 import { ISA_SEA_LEVEL_PRESSURE, ISA_SEA_LEVEL_TEMPERATURE, ISA_SEA_LEVEL_DENSITY } from './units';
 import type {
@@ -35,6 +36,7 @@ export function defaultDroneParams(): DroneParams {
     dragMode: 'linear',
     dragCoeffRotor: v3Create(0, 0, 0),  // Phase 11: rotor drag off by default
     rotorInertia: 0,                     // Phase 11: gyro torque off by default
+    battery: defaultBatteryConfig(),
   };
 }
 
